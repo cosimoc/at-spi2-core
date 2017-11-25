@@ -73,21 +73,15 @@ extern const char *atspi_interface_value;
 /* function prototypes */
 gint _atspi_get_iface_num (const char *iface);
 
-DBusConnection * _atspi_bus ();
+GDBusConnection * _atspi_bus ();
 
 AtspiAccessible * _atspi_ref_accessible (const char *app, const char *path);
 
 AtspiAccessible *
-_atspi_dbus_return_accessible_from_message (DBusMessage *message);
-
-AtspiAccessible *
-_atspi_dbus_return_accessible_from_iter (DBusMessageIter *iter);
+_atspi_dbus_return_accessible_from_variant (GVariant *variant);
 
 AtspiHyperlink *
-_atspi_dbus_return_hyperlink_from_message (DBusMessage *message);
-
-AtspiHyperlink *
-_atspi_dbus_return_hyperlink_from_iter (DBusMessageIter *iter);
+_atspi_dbus_return_hyperlink_from_variant (GVariant *variant);
 
 dbus_bool_t _atspi_dbus_call (gpointer obj, const char *interface, const char *method, GError **error, const char *type, ...);
 
@@ -99,17 +93,13 @@ dbus_bool_t _atspi_dbus_get_property (gpointer obj, const char *interface, const
 
 DBusMessage * _atspi_dbus_send_with_reply_and_block (DBusMessage *message, GError **error);
 
-GHashTable *_atspi_dbus_return_hash_from_message (DBusMessage *message);
+GHashTable *_atspi_dbus_return_hash_from_variant (GVariant *variant);
 
-GHashTable *_atspi_dbus_hash_from_iter (DBusMessageIter *iter);
+GArray *_atspi_dbus_return_attribute_array_from_variant (GVariant *variant);
 
-GArray *_atspi_dbus_return_attribute_array_from_message (DBusMessage *message);
+void _atspi_dbus_set_interfaces (AtspiAccessible *accessible, const char **interfaces);
 
-GArray *_atspi_dbus_attribute_array_from_iter (DBusMessageIter *iter);
-
-void _atspi_dbus_set_interfaces (AtspiAccessible *accessible, DBusMessageIter *iter);
-
-void _atspi_dbus_set_state (AtspiAccessible *accessible, DBusMessageIter *iter);
+void _atspi_dbus_set_state (AtspiAccessible *accessible, GVariant *variant);
 
 #define _ATSPI_DBUS_CHECK_SIG(message, type, error, ret) \
   if (!message) \
@@ -159,7 +149,11 @@ GHashTable *_atspi_get_live_refs ();
 
 gchar *_atspi_name_compat (gchar *in);
 
-GHashTable *_atspi_dbus_update_cache_from_dict (AtspiAccessible *accessible, DBusMessageIter *iter);
+void _atspi_dbus_update_cache_from_variant (AtspiAccessible *accessible, GVariant *variant);
+
+void _atspi_dbus_cleanup (void);
+
+char *_atspi_dbus_get_address (void);
 
 gboolean _atspi_get_allow_sync ();
 

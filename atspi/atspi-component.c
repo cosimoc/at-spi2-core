@@ -30,6 +30,16 @@
 #include "atspi-private.h"
 #include "atspi-accessible-private.h"
 
+#include "xml/a11y-atspi-component.h"
+
+static A11yAtspiComponent *
+get_component_proxy (AtspiComponent *component)
+{
+  return atspi_accessible_get_iface_proxy
+    (ATSPI_ACCESSIBLE (component), (AtspiAccessibleProxyInit) a11y_atspi_component_proxy_new_sync,
+     "a11y-atspi-component-proxy");
+}
+
 void
 atspi_rect_free (AtspiRect *rect)
 {
@@ -79,14 +89,12 @@ atspi_component_contains (AtspiComponent *obj,
                               gint y,
                               AtspiCoordType ctype, GError **error)
 {
-  dbus_bool_t retval = FALSE;
-  dbus_int32_t d_x = x, d_y = y;
-  dbus_uint32_t d_ctype = ctype;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_component, "Contains", error, "iiu=>b", d_x, d_y, d_ctype, &retval);
-
+  a11y_atspi_component_call_contains_sync (get_component_proxy (obj), x, y, ctype,
+                                           &retval, NULL, error);
   return retval;
 }
 
@@ -111,15 +119,20 @@ atspi_component_get_accessible_at_point (AtspiComponent *obj,
                                           gint y,
                                           AtspiCoordType ctype, GError **error)
 {
-  dbus_int32_t d_x = x, d_y = y;
-  dbus_uint32_t d_ctype = ctype;
-  DBusMessage *reply;
+  AtspiAccessible *accessible = NULL;
+  GVariant *variant;
 
-  g_return_val_if_fail (obj != NULL, FALSE);
+  g_return_val_if_fail (obj != NULL, NULL);
 
-  reply = _atspi_dbus_call_partial (obj, atspi_interface_component, "GetAccessibleAtPoint", error, "iiu", d_x, d_y, d_ctype);
+  if (a11y_atspi_component_call_get_accessible_at_point_sync (get_component_proxy (obj),
+                                                              x, y, ctype,
+                                                              &variant, NULL, error))
+    {
+      accessible = _atspi_dbus_return_accessible_from_variant (variant);
+      g_variant_unref (variant);
+    }
 
-  return _atspi_dbus_return_accessible_from_message (reply);
+  return accessible;
 }
 
 /**
@@ -136,9 +149,9 @@ AtspiRect *
 atspi_component_get_extents (AtspiComponent *obj,
                                 AtspiCoordType ctype, GError **error)
 {
-  dbus_uint32_t d_ctype = ctype;
   AtspiRect bbox;
   AtspiAccessible *accessible;
+  GVariant *variant;
 
   bbox.x = bbox.y = bbox.width = bbox.height = -1;
   g_return_val_if_fail (obj != NULL, atspi_rect_copy (&bbox));
@@ -153,7 +166,13 @@ atspi_component_get_extents (AtspiComponent *obj,
     }
   }
 
-  _atspi_dbus_call (obj, atspi_interface_component, "GetExtents", error, "u=>(iiii)", d_ctype, &bbox);
+  if (a11y_atspi_component_call_get_extents_sync (get_component_proxy (obj), ctype,
+                                                  &variant, NULL, error))
+    {
+      g_variant_get (variant, "(iiii)",
+                     &bbox.x, &bbox.y, &bbox.width, &bbox.height);
+      g_variant_unref (variant);
+    }
   return atspi_rect_copy (&bbox);
 }
 
@@ -171,19 +190,13 @@ AtspiPoint *
 atspi_component_get_position (AtspiComponent *obj,
                                  AtspiCoordType ctype, GError **error)
 {
-  dbus_int32_t d_x, d_y;
-  dbus_uint32_t d_ctype = ctype;
   AtspiPoint ret;
 
   ret.x = ret.y = -1;
+  g_return_val_if_fail (obj != NULL, atspi_point_copy (&ret));
 
-  if (!obj)
-    return atspi_point_copy (&ret);
-
-  _atspi_dbus_call (obj, atspi_interface_component, "GetPosition", error, "u=>ii", d_ctype, &d_x, &d_y);
-
-  ret.x = d_x;
-  ret.y = d_y;
+  a11y_atspi_component_call_get_position_sync (get_component_proxy (obj), ctype,
+                                               &ret.x, &ret.y, NULL, error);
   return atspi_point_copy (&ret);
 }
 
@@ -198,16 +211,13 @@ atspi_component_get_position (AtspiComponent *obj,
 AtspiPoint *
 atspi_component_get_size (AtspiComponent *obj, GError **error)
 {
-  dbus_int32_t d_w, d_h;
   AtspiPoint ret;
 
   ret.x = ret.y = -1;
-  if (!obj)
-    return atspi_point_copy (&ret);
+  g_return_val_if_fail (obj != NULL, atspi_point_copy (&ret));
 
-  _atspi_dbus_call (obj, atspi_interface_component, "GetSize", error, "=>ii", &d_w, &d_h);
-  ret.x = d_w;
-  ret.y = d_h;
+  a11y_atspi_component_call_get_size_sync (get_component_proxy (obj),
+                                           &ret.x, &ret.y, NULL, error);
   return atspi_point_copy (&ret);
 }
 
@@ -223,11 +233,11 @@ atspi_component_get_size (AtspiComponent *obj, GError **error)
 AtspiComponentLayer
 atspi_component_get_layer (AtspiComponent *obj, GError **error)
 {
-  dbus_uint32_t zlayer = -1;
+  guint32 retval = -1;
 
-  _atspi_dbus_call (obj, atspi_interface_component, "GetLayer", error, "=>u", &zlayer);
-
-  return zlayer;
+  a11y_atspi_component_call_get_layer_sync (get_component_proxy (obj),
+                                            &retval, NULL, error);
+  return retval;
 }
 
 /**
@@ -243,10 +253,10 @@ atspi_component_get_layer (AtspiComponent *obj, GError **error)
 gshort
 atspi_component_get_mdi_z_order (AtspiComponent *obj, GError **error)
 {
-  dbus_uint16_t retval = -1;
+  gint16 retval = -1;
 
-  _atspi_dbus_call (obj, atspi_interface_component, "GetMDIZOrder", error, "=>n", &retval);
-
+  a11y_atspi_component_call_get_mdizorder_sync (get_component_proxy (obj),
+                                                &retval, NULL, error);
   return retval;
 }
 
@@ -263,10 +273,10 @@ atspi_component_get_mdi_z_order (AtspiComponent *obj, GError **error)
 gboolean
 atspi_component_grab_focus (AtspiComponent *obj, GError **error)
 {
-  dbus_bool_t retval = FALSE;
+  gboolean retval = FALSE;
 
-  _atspi_dbus_call (obj, atspi_interface_component, "GrabFocus", error, "=>b", &retval);
-
+  a11y_atspi_component_call_grab_focus_sync (get_component_proxy (obj),
+                                             &retval, NULL, error);
   return retval;
 }
 
@@ -281,10 +291,10 @@ atspi_component_grab_focus (AtspiComponent *obj, GError **error)
 gdouble      
 atspi_component_get_alpha    (AtspiComponent *obj, GError **error)
 {
-  double retval = 1;
+  gdouble retval = 1;
 
-  _atspi_dbus_call (obj, atspi_interface_component, "GetAlpha", error, "=>d", &retval);
-
+  a11y_atspi_component_call_get_alpha_sync (get_component_proxy (obj),
+                                            &retval, NULL, error);
   return retval;
 }
 
@@ -311,11 +321,7 @@ atspi_component_set_extents (AtspiComponent *obj,
                              AtspiCoordType ctype,
                              GError **error)
 {
-  dbus_int32_t d_x = x, d_y = y, d_width = width, d_height = height;
-  dbus_uint32_t d_ctype = ctype;
-  DBusMessageIter iter, iter_struct;
-  DBusMessage *message, *reply;
-  dbus_bool_t retval = FALSE;
+  gboolean retval = FALSE;
   AtspiAccessible *aobj = ATSPI_ACCESSIBLE (obj);
 
   g_return_val_if_fail (obj != NULL, FALSE);
@@ -327,30 +333,9 @@ atspi_component_set_extents (AtspiComponent *obj,
     return FALSE;
   }
 
-  message = dbus_message_new_method_call (aobj->parent.app->bus_name,
-                                          aobj->parent.path,
-                                          atspi_interface_component,
-                                          "SetExtents");
-  if (!message)
-    return FALSE;
-
-  dbus_message_iter_init_append (message, &iter);
-  if (!dbus_message_iter_open_container (&iter, DBUS_TYPE_STRUCT, NULL, &iter_struct))
-  {
-    dbus_message_unref (message);
-    return FALSE;
-  }
-  dbus_message_iter_append_basic (&iter_struct, DBUS_TYPE_INT32, &d_x);
-  dbus_message_iter_append_basic (&iter_struct, DBUS_TYPE_INT32, &d_y);
-  dbus_message_iter_append_basic (&iter_struct, DBUS_TYPE_INT32, &d_width);
-  dbus_message_iter_append_basic (&iter_struct, DBUS_TYPE_INT32, &d_height);
-  dbus_message_iter_close_container (&iter, &iter_struct);
-  dbus_message_iter_append_basic (&iter, DBUS_TYPE_UINT32, &d_ctype);
-
-  reply = _atspi_dbus_send_with_reply_and_block (message, error);
-  dbus_message_get_args (reply, NULL, DBUS_TYPE_BOOLEAN, &retval,
-                              DBUS_TYPE_INVALID);
-  dbus_message_unref (reply);
+  a11y_atspi_component_call_set_extents_sync (get_component_proxy (obj),
+                                              x, y, width, height, ctype,
+                                              &retval, NULL, error);
   return retval;
 }
 
@@ -373,16 +358,14 @@ atspi_component_set_position (AtspiComponent *obj,
                               AtspiCoordType ctype,
                               GError **error)
 {
-  dbus_int32_t d_x = x, d_y = y;
-  dbus_uint32_t d_ctype = ctype;
-  dbus_bool_t ret = FALSE;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_component, "SetPosition", error,
-                    "iiu=>b", d_x, d_y, d_ctype, &ret);
-
-  return ret;
+  a11y_atspi_component_call_set_position_sync (get_component_proxy (obj),
+                                               x, y, ctype,
+                                               &retval, NULL, error);
+  return retval;
 }
 
 /**
@@ -401,15 +384,14 @@ atspi_component_set_size (AtspiComponent *obj,
                           gint height,
                           GError **error)
 {
-  dbus_int32_t d_width = width, d_height = height;
-  dbus_bool_t ret = FALSE;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_component, "SetSize", error, "ii=>b",
-                    d_width, d_height, &ret);
-
-  return ret;
+  a11y_atspi_component_call_set_size_sync (get_component_proxy (obj),
+                                           width, height,
+                                           &retval, NULL, error);
+  return retval;
 }
 
 static void

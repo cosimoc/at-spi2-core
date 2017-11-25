@@ -25,10 +25,11 @@
 #ifndef _ATSPI_APPLICATION_H_
 #define _ATSPI_APPLICATION_H_
 
-#include <dbus/dbus.h>
+#include <gio/gio.h>
 
 #include "atspi-types.h"
 #include "atspi-accessible.h"
+
 #include <sys/time.h>
 
 G_BEGIN_DECLS
@@ -45,14 +46,11 @@ struct _AtspiApplication
 {
   GObject parent;
   GHashTable *hash;
-  char *bus_name;
-  DBusConnection *bus;
+  gchar *bus_name;
   struct _AtspiAccessible *root;
   AtspiCache cache;
-  gchar *toolkit_name;
-  gchar *toolkit_version;
-  gchar *atspi_version;
   struct timeval time_added;
+  guint watch_id;
 };
 
 typedef struct _AtspiApplicationClass AtspiApplicationClass;

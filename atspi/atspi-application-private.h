@@ -5,7 +5,7 @@
  * Copyright 2002 Ximian, Inc.
  *           2002 Sun Microsystems Inc.
  * Copyright 2010, 2011 Novell, Inc.
- *           
+ *
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -23,35 +23,17 @@
  * Boston, MA 02111-1307, USA.
  */
 
-#ifndef _ATSPI_MISC_H_
-#define _ATSPI_MISC_H_
-
-#include <dbus/dbus.h>
+#ifndef _ATSPI_APPLICATION_PRIVATE_H_
+#define _ATSPI_APPLICATION_PRIVATE_H_
 
 G_BEGIN_DECLS
 
-int atspi_init (void);
-gboolean atspi_is_initialized (void);
+#include "atspi-application.h"
 
-void atspi_event_main ();
+#include "xml/a11y-atspi-application.h"
 
-void atspi_event_quit ();
+A11yAtspiApplication * atspi_application_get_application_proxy (AtspiApplication *app);
 
-int atspi_exit ();
-
-DBusConnection *
-atspi_get_a11y_bus ();
-
-GDBusConnection *
-atspi_get_a11y_gdbus (void);
-
-void
-atspi_set_timeout (gint val, gint startup_time);
-
-void
-atspi_set_main_context (GMainContext *cnx);
-
-gchar * atspi_role_get_name (AtspiRole role);
 G_END_DECLS
 
-#endif	/* _ATSPI_MISC_H_ */
+#endif	/* _ATSPI_APPLICATION_PRIVATE_H_ */

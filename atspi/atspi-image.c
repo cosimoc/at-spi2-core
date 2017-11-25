@@ -24,6 +24,16 @@
 
 #include "atspi-private.h"
 
+#include "xml/a11y-atspi-image.h"
+
+static A11yAtspiImage *
+get_image_proxy (AtspiImage *image)
+{
+  return atspi_accessible_get_iface_proxy
+    (ATSPI_ACCESSIBLE (image), (AtspiAccessibleProxyInit) a11y_atspi_image_proxy_new_sync,
+     "a11y-atspi-image-proxy");
+}
+
 /**
  * atspi_image_get_image_description:
  * @obj: a pointer to the #AtspiImage implementor on which to operate.
@@ -35,13 +45,9 @@
 gchar *
 atspi_image_get_image_description (AtspiImage *obj, GError **error)
 {
-  char *retval = NULL;
-
   g_return_val_if_fail (obj != NULL, NULL);
 
-  _atspi_dbus_get_property (obj, atspi_interface_image, "ImageDescription", error, "s", &retval);
-
-  return retval;
+  return a11y_atspi_image_dup_image_description (get_image_proxy (obj));
 }
 
 /**
@@ -57,16 +63,14 @@ atspi_image_get_image_description (AtspiImage *obj, GError **error)
 AtspiPoint *
 atspi_image_get_image_size (AtspiImage *obj, GError **error)
 {
-  dbus_int32_t d_w, d_h;
   AtspiPoint ret;
 
   ret.x = ret.y = -1;
-  if (!obj)
-    return atspi_point_copy (&ret);
+  g_return_val_if_fail (obj != NULL, atspi_point_copy (&ret));
 
-  _atspi_dbus_call (obj, atspi_interface_image, "GetImageSize", error, "=>ii", &d_w, &d_h);
-  ret.x = d_w;
-  ret.y = d_h;
+  a11y_atspi_image_call_get_image_size_sync (get_image_proxy (obj),
+                                             &ret.x, &ret.y,
+                                             NULL, error);
   return atspi_point_copy (&ret);
 }
 
@@ -88,19 +92,15 @@ atspi_image_get_image_position (AtspiImage *obj,
                                 AtspiCoordType ctype,
                                 GError **error)
 {
-  dbus_int32_t d_x, d_y;
-  dbus_uint32_t d_ctype = ctype;
   AtspiPoint ret;
 
   ret.x = ret.y = 0;
+  g_return_val_if_fail (obj != NULL, atspi_point_copy (&ret));
 
-  if (!obj)
-    return atspi_point_copy (&ret);
-
-  _atspi_dbus_call (obj, atspi_interface_image, "GetImagePosition", error, "u=>ii", d_ctype, &d_x, &d_y);
-
-  ret.x = d_x;
-  ret.y = d_y;
+  a11y_atspi_image_call_get_image_position_sync (get_image_proxy (obj),
+                                                 ctype,
+                                                 &ret.x, &ret.y,
+                                                 NULL, error);
   return atspi_point_copy (&ret);
 }
 
@@ -121,13 +121,20 @@ atspi_image_get_image_extents (AtspiImage *obj,
 			       AtspiCoordType ctype,
 			       GError **error)
 {
-  dbus_uint32_t d_ctype = ctype;
+  GVariant *variant = NULL;
   AtspiRect bbox;
 
   bbox.x = bbox.y = bbox.width = bbox.height = -1;
   g_return_val_if_fail (obj != NULL, atspi_rect_copy (&bbox));
 
-  _atspi_dbus_call (obj, atspi_interface_image, "GetImageExtents", error, "u=>(iiii)", d_ctype, &bbox);
+  if (a11y_atspi_image_call_get_image_extents_sync (get_image_proxy (obj),
+                                                    ctype,
+                                                    &variant, NULL, error))
+    {
+      g_variant_get (variant, "(iiii)", &bbox.x, &bbox.y,
+                     &bbox.width, &bbox.height);
+      g_variant_unref (variant);
+    }
 
   return atspi_rect_copy (&bbox);
 }
@@ -143,13 +150,9 @@ atspi_image_get_image_extents (AtspiImage *obj,
 gchar *
 atspi_image_get_image_locale  (AtspiImage *obj, GError **error)
 {
-  gchar *retval = NULL;
-
   g_return_val_if_fail (obj != NULL, g_strdup ("C"));
 
-  _atspi_dbus_get_property (obj, atspi_interface_image, "ImageLocale", error, "s", &retval);
-
-  return retval;
+  return a11y_atspi_image_dup_image_locale (get_image_proxy (obj));
 }
 
 static void

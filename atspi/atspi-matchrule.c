@@ -179,33 +179,18 @@ atspi_match_rule_new (AtspiStateSet *states,
 static void
 append_entry (gpointer key, gpointer val, gpointer data)
 {
-  DBusMessageIter *iter = data;
-  DBusMessageIter iter_entry;
-
-  if (!dbus_message_iter_open_container (iter, DBUS_TYPE_DICT_ENTRY, NULL,
-                                        &iter_entry))
-    return;
-  dbus_message_iter_append_basic (&iter_entry, DBUS_TYPE_STRING, &key);
-  dbus_message_iter_append_basic (&iter_entry, DBUS_TYPE_STRING, &val);
-  dbus_message_iter_close_container (iter, &iter_entry);
+  GVariantBuilder *builder = data;
+  g_variant_builder_add (builder, "ss", key, val);
 }
 
-gboolean
-_atspi_match_rule_marshal (AtspiMatchRule *rule, DBusMessageIter *iter)
+GVariant *
+_atspi_match_rule_to_variant (AtspiMatchRule *rule)
 {
-  DBusMessageIter iter_struct, iter_array, iter_dict;
-  dbus_int32_t states [2];
-  dbus_int32_t d_statematchtype = rule->statematchtype;
-  dbus_int32_t d_attributematchtype = rule->attributematchtype;
-  dbus_int32_t d_interfacematchtype = rule->interfacematchtype;
-  dbus_uint32_t d_rolematchtype = rule->rolematchtype;
-  dbus_bool_t d_invert = rule->invert;
+  GVariantBuilder builder, array_builder;
+  gint states[2];
   gint i;
-  dbus_int32_t d_role;
 
-  if (!dbus_message_iter_open_container (iter, DBUS_TYPE_STRUCT, NULL,
-                                         &iter_struct))
-    return FALSE;
+  g_variant_builder_init (&builder, G_VARIANT_TYPE ("(aiia{ss}iaiiasib)"));
 
   /* states */
   if (rule->states)
@@ -217,53 +202,36 @@ _atspi_match_rule_marshal (AtspiMatchRule *rule, DBusMessageIter *iter)
   {
     states [0] = states [1] = 0;
   }
-  dbus_message_iter_open_container (&iter_struct, DBUS_TYPE_ARRAY, "i", &iter_array);
-  dbus_message_iter_append_basic (&iter_array, DBUS_TYPE_INT32, &states [0]);
-  dbus_message_iter_append_basic (&iter_array, DBUS_TYPE_INT32, &states [1]);
-  dbus_message_iter_close_container (&iter_struct, &iter_array);
-  dbus_message_iter_append_basic (&iter_struct, DBUS_TYPE_INT32, &d_statematchtype);
+
+  g_variant_builder_add_value (&builder, g_variant_new_fixed_array (G_VARIANT_TYPE_INT32,
+                                                                    states, 2, sizeof (gint)));
+  g_variant_builder_add (&builder, "i", rule->statematchtype);
 
   /* attributes */
-  if (!dbus_message_iter_open_container (&iter_struct, DBUS_TYPE_ARRAY, "{ss}",
-                                         &iter_dict))
-    return FALSE;
+  g_variant_builder_init (&array_builder, G_VARIANT_TYPE ("a{ss}"));
   if (rule->attributes)
-    g_hash_table_foreach (rule->attributes, append_entry, &iter_dict);
-  dbus_message_iter_close_container (&iter_struct, &iter_dict);
-  dbus_message_iter_append_basic (&iter_struct, DBUS_TYPE_INT32, &d_attributematchtype);
+    g_hash_table_foreach (rule->attributes, append_entry, &array_builder);
+  g_variant_builder_add_value (&builder, g_variant_builder_end (&array_builder));
+  g_variant_builder_add (&builder, "i", rule->attributematchtype);
 
-  if (!dbus_message_iter_open_container (&iter_struct, DBUS_TYPE_ARRAY, "i",
-      &iter_array))
-    return FALSE;
-  d_role = rule->roles [0];
-  dbus_message_iter_append_basic (&iter_array, DBUS_TYPE_INT32, &d_role);
-  d_role = rule->roles [1];
-  dbus_message_iter_append_basic (&iter_array, DBUS_TYPE_INT32, &d_role);
-  d_role = rule->roles [2];
-  dbus_message_iter_append_basic (&iter_array, DBUS_TYPE_INT32, &d_role);
-  d_role = rule->roles [3];
-  dbus_message_iter_append_basic (&iter_array, DBUS_TYPE_INT32, &d_role);
-  dbus_message_iter_close_container (&iter_struct, &iter_array);
-  dbus_message_iter_append_basic (&iter_struct, DBUS_TYPE_INT32,
-                                  &d_rolematchtype);
+  g_variant_builder_add_value (&builder, g_variant_new_fixed_array (G_VARIANT_TYPE_INT32,
+                                                                    rule->roles, 4, sizeof (gint)));
+  g_variant_builder_add (&builder, "i", rule->rolematchtype);
 
   /* interfaces */
-  if (!dbus_message_iter_open_container (&iter_struct, DBUS_TYPE_ARRAY, "s",
-      &iter_array))
-    return FALSE;
+  g_variant_builder_init (&array_builder, G_VARIANT_TYPE_STRING_ARRAY);
   if (rule->interfaces)
   {
     for (i = 0; i < rule->interfaces->len; i++)
     {
       char *val = g_array_index (rule->interfaces, gchar *, i);
-      dbus_message_iter_append_basic (&iter_array, DBUS_TYPE_STRING, &val);
+      g_variant_builder_add (&array_builder, "s", val);
     }
   }
-  dbus_message_iter_close_container (&iter_struct, &iter_array);
-  dbus_message_iter_append_basic (&iter_struct, DBUS_TYPE_INT32, &d_interfacematchtype);
+  g_variant_builder_add_value (&builder, g_variant_builder_end (&array_builder));
+  g_variant_builder_add (&builder, "i", rule->interfacematchtype);
 
-  dbus_message_iter_append_basic (&iter_struct, DBUS_TYPE_BOOLEAN, &d_invert);
+  g_variant_builder_add (&builder, "b", rule->invert);
 
-  dbus_message_iter_close_container (iter, &iter_struct);
-  return TRUE;
+  return g_variant_builder_end (&builder);
 }

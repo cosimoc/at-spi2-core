@@ -24,10 +24,21 @@
 
 #include "atspi-private.h"
 #include "atspi-accessible-private.h"
+
+#include "xml/a11y-atspi-component.h"
+#include "xml/a11y-atspi-document.h"
+#include "xml/a11y-atspi-editable-text.h"
+#include "xml/a11y-atspi-hypertext.h"
+#include "xml/a11y-atspi-image.h"
+#include "xml/a11y-atspi-selection.h"
+#include "xml/a11y-atspi-table.h"
+#include "xml/a11y-atspi-table-cell.h"
+#include "xml/a11y-atspi-text.h"
+#include "xml/a11y-atspi-value.h"
+
 #include <string.h>
 
 static gboolean enable_caching = FALSE;
-static guint quark_locale;
 
 static void
 atspi_action_interface_init (AtspiAction *action)
@@ -35,7 +46,7 @@ atspi_action_interface_init (AtspiAction *action)
 }
 
 static void
-atspi_collection_interface_init (AtspiCollection *component)
+atspi_collection_interface_init (AtspiCollection *collection)
 {
 }
 
@@ -182,6 +193,8 @@ atspi_accessible_finalize (GObject *object)
   if (accessible->priv->cache)
     g_hash_table_destroy (accessible->priv->cache);
 
+  g_clear_object (&accessible->priv->accessible_proxy);
+
 #ifdef DEBUG_REF_COUNTS
   accessible_count--;
   g_hash_table_remove (_atspi_get_live_refs (), accessible);
@@ -198,8 +211,6 @@ atspi_accessible_class_init (AtspiAccessibleClass *klass)
 
   object_class->dispose = atspi_accessible_dispose;
   object_class->finalize = atspi_accessible_finalize;
-
-  quark_locale = g_quark_from_string ("accessible-locale");
 }
 
 /**
@@ -215,11 +226,10 @@ gchar *
 atspi_accessible_get_name (AtspiAccessible *obj, GError **error)
 {
   g_return_val_if_fail (obj != NULL, g_strdup (""));
+
   if (!_atspi_accessible_test_cache (obj, ATSPI_CACHE_NAME))
   {
-    if (!_atspi_dbus_get_property (obj, atspi_interface_accessible, "Name", error,
-                                   "s", &obj->name))
-      return g_strdup ("");
+    obj->name = a11y_atspi_accessible_dup_name (obj->priv->accessible_proxy);
     _atspi_accessible_add_cache (obj, ATSPI_CACHE_NAME);
   }
   return g_strdup (obj->name);
@@ -241,10 +251,7 @@ atspi_accessible_get_description (AtspiAccessible *obj, GError **error)
 
   if (!_atspi_accessible_test_cache (obj, ATSPI_CACHE_DESCRIPTION))
   {
-    if (!_atspi_dbus_get_property (obj, atspi_interface_accessible,
-                                   "Description", error, "s",
-                                   &obj->description))
-      return g_strdup ("");
+    obj->description = a11y_atspi_accessible_dup_description (obj->priv->accessible_proxy);
     _atspi_accessible_add_cache (obj, ATSPI_CACHE_DESCRIPTION);
   }
   return g_strdup (obj->description);
@@ -271,30 +278,14 @@ atspi_accessible_get_parent (AtspiAccessible *obj, GError **error)
 
   if (!_atspi_accessible_test_cache (obj, ATSPI_CACHE_PARENT))
   {
-    DBusMessage *message, *reply;
-    DBusMessageIter iter, iter_variant;
+    GVariant *variant;
+
     if (!obj->parent.app)
       return NULL;
-    message = dbus_message_new_method_call (obj->parent.app->bus_name,
-                                            obj->parent.path,
-                                            DBUS_INTERFACE_PROPERTIES, "Get");
-    if (!message)
+    variant = a11y_atspi_accessible_get_parent (obj->priv->accessible_proxy);
+    if (!variant)
       return NULL;
-    dbus_message_append_args (message, DBUS_TYPE_STRING, &atspi_interface_accessible,
-                               DBUS_TYPE_STRING, &str_parent,
-                              DBUS_TYPE_INVALID);
-    reply = _atspi_dbus_send_with_reply_and_block (message, error);
-    if (!reply)
-      return NULL;
-    if (strcmp (dbus_message_get_signature (reply), "v") != 0)
-    {
-      dbus_message_unref (reply);
-      return NULL;
-    }
-    dbus_message_iter_init (reply, &iter);
-    dbus_message_iter_recurse (&iter, &iter_variant);
-    obj->accessible_parent = _atspi_dbus_return_accessible_from_iter (&iter_variant);
-    dbus_message_unref (reply);
+    obj->accessible_parent = _atspi_dbus_return_accessible_from_variant (variant);
     _atspi_accessible_add_cache (obj, ATSPI_CACHE_PARENT);
   }
   if (!obj->accessible_parent)
@@ -318,13 +309,7 @@ atspi_accessible_get_child_count (AtspiAccessible *obj, GError **error)
   g_return_val_if_fail (obj != NULL, -1);
 
   if (!_atspi_accessible_test_cache (obj, ATSPI_CACHE_CHILDREN))
-  {
-    dbus_int32_t ret;
-    if (!_atspi_dbus_get_property (obj, atspi_interface_accessible,
-                                   "ChildCount", error, "i", &ret))
-      return -1;
-    return ret;
-  }
+    return a11y_atspi_accessible_get_child_count (obj->priv->accessible_proxy);
 
   if (!obj->children)
     return 0;	/* assume it's disposed */
@@ -348,7 +333,7 @@ atspi_accessible_get_child_at_index (AtspiAccessible *obj,
                             GError **error)
 {
   AtspiAccessible *child;
-  DBusMessage *reply;
+  GVariant *variant = NULL;
 
   g_return_val_if_fail (obj != NULL, NULL);
 
@@ -362,10 +347,12 @@ atspi_accessible_get_child_at_index (AtspiAccessible *obj,
       return g_object_ref (child);
   }
 
-  reply = _atspi_dbus_call_partial (obj, atspi_interface_accessible,
-                                   "GetChildAtIndex", error, "i", child_index);
-  child = _atspi_dbus_return_accessible_from_message (reply);
+  if (!a11y_atspi_accessible_call_get_child_at_index_sync (obj->priv->accessible_proxy,
+                                                           child_index, &variant,
+                                                           NULL, error))
+    return NULL;
 
+  child = _atspi_dbus_return_accessible_from_variant (variant);
   if (!child)
     return NULL;
 
@@ -410,16 +397,12 @@ atspi_accessible_get_index_in_parent (AtspiAccessible *obj, GError **error)
   }
 
 dbus:
-  _atspi_dbus_call (obj, atspi_interface_accessible,
-                    "GetIndexInParent", NULL, "=>i", &ret);
-  return ret;
-}
+  if (a11y_atspi_accessible_call_get_index_in_parent_sync (obj->priv->accessible_proxy,
+                                                           &ret, NULL, error))
+    return ret;
 
-typedef struct
-{
-  dbus_uint32_t type;
-  GArray *targets;
-} Accessibility_Relation;
+  return -1;
+}
 
 /**
  * atspi_accessible_get_relation_set:
@@ -434,28 +417,27 @@ typedef struct
 GArray *
 atspi_accessible_get_relation_set (AtspiAccessible *obj, GError **error)
 {
-  DBusMessage *reply;
-  DBusMessageIter iter, iter_array;
+  GVariant *variant, *value;
+  GVariantIter iter;
   GArray *ret;
 
   g_return_val_if_fail (obj != NULL, NULL);
 
-  reply = _atspi_dbus_call_partial (obj, atspi_interface_accessible, "GetRelationSet", error, "");
-  if (!reply)
+  if (!a11y_atspi_accessible_call_get_relation_set_sync (obj->priv->accessible_proxy,
+                                                         &variant, NULL, error))
     return NULL;
-  _ATSPI_DBUS_CHECK_SIG (reply, "a(ua(so))", error, NULL);
+  //_ATSPI_DBUS_CHECK_SIG (reply, "a(ua(so))", error, NULL);
 
   ret = g_array_new (TRUE, TRUE, sizeof (AtspiRelation *));
-  dbus_message_iter_init (reply, &iter);
-  dbus_message_iter_recurse (&iter, &iter_array);
-  while (dbus_message_iter_get_arg_type (&iter_array) != DBUS_TYPE_INVALID)
-  {
-    AtspiRelation *relation;
-    relation = _atspi_relation_new_from_iter (&iter_array);
-    ret = g_array_append_val (ret, relation);
-    dbus_message_iter_next (&iter_array);
-  }
-  dbus_message_unref (reply);
+  g_variant_iter_init (&iter, variant);
+  while ((value = g_variant_iter_next_value (&iter)))
+    {
+      AtspiRelation *relation;
+      relation = _atspi_relation_new_from_variant (value);
+      ret = g_array_append_val (ret, relation);
+      g_variant_unref (value);
+    }
+  g_variant_unref (variant);
   return ret;
 }
 
@@ -476,12 +458,13 @@ atspi_accessible_get_role (AtspiAccessible *obj, GError **error)
 
   if (!_atspi_accessible_test_cache (obj, ATSPI_CACHE_ROLE))
   {
-    dbus_uint32_t role;
-    /* TODO: Make this a property */
-    if (_atspi_dbus_call (obj, atspi_interface_accessible, "GetRole", error, "=>u", &role))
+    guint role;
+
+    if (a11y_atspi_accessible_call_get_role_sync (obj->priv->accessible_proxy,
+                                                  &role, NULL, error))
     {
       obj->role = role;
-    _atspi_accessible_add_cache (obj, ATSPI_CACHE_ROLE);
+      _atspi_accessible_add_cache (obj, ATSPI_CACHE_ROLE);
     }
   }
   return obj->role;
@@ -511,12 +494,11 @@ atspi_accessible_get_role_name (AtspiAccessible *obj, GError **error)
   if (role >= 0 && role < ATSPI_ROLE_COUNT && role != ATSPI_ROLE_EXTENDED)
     return atspi_role_get_name (role);
 
-  _atspi_dbus_call (obj, atspi_interface_accessible, "GetRoleName", error, "=>s", &retval);
+  if (a11y_atspi_accessible_call_get_role_name_sync (obj->priv->accessible_proxy,
+                                                     &retval, NULL, error))
+    return retval;
 
-  if (!retval)
-    retval = g_strdup ("");
-
-  return retval;
+  return g_strdup ("");
 }
 
 /**
@@ -535,13 +517,12 @@ atspi_accessible_get_role_name (AtspiAccessible *obj, GError **error)
 gchar *
 atspi_accessible_get_localized_role_name (AtspiAccessible *obj, GError **error)
 {
-  char *retval = NULL;
+  gchar *retval = NULL;
 
   g_return_val_if_fail (obj != NULL, NULL);
 
-  _atspi_dbus_call (obj, atspi_interface_accessible, "GetLocalizedRoleName", error, "=>s", &retval);
-
-  if (!retval)
+  if (!a11y_atspi_accessible_call_get_localized_role_name_sync (obj->priv->accessible_proxy,
+                                                                &retval, NULL, NULL))
     return g_strdup ("");
 
   return retval;
@@ -553,6 +534,15 @@ defunct_set ()
   AtspiStateSet *set = atspi_state_set_new (NULL);
   atspi_state_set_add (set, ATSPI_STATE_DEFUNCT);
   return set;
+}
+
+GVariant *
+_atspi_accessible_get_state (AtspiAccessible *obj)
+{
+  GVariant *variant = NULL;
+  a11y_atspi_accessible_call_get_state_sync (obj->priv->accessible_proxy,
+                                             &variant, NULL, NULL);
+  return variant;
 }
 
 /**
@@ -568,20 +558,18 @@ AtspiStateSet *
 atspi_accessible_get_state_set (AtspiAccessible *obj)
 {
   /* TODO: Should take a GError **, but would be an API break */
-  if (!obj->parent.app || !obj->parent.app->bus)
+  if (!obj->parent.app || !atspi_application_get_application_proxy (obj->parent.app))
     return defunct_set ();
 
   if (!_atspi_accessible_test_cache (obj, ATSPI_CACHE_STATES))
   {
-    DBusMessage *reply;
-    DBusMessageIter iter;
-    reply = _atspi_dbus_call_partial (obj, atspi_interface_accessible,
-                                      "GetState", NULL, "");
-    _ATSPI_DBUS_CHECK_SIG (reply, "au", NULL, defunct_set ());
-    dbus_message_iter_init (reply, &iter);
-    _atspi_dbus_set_state (obj, &iter);
-    dbus_message_unref (reply);
-    _atspi_accessible_add_cache (obj, ATSPI_CACHE_STATES);
+    GVariant *variant = _atspi_accessible_get_state (obj);
+    if (variant)
+      {
+        _atspi_dbus_set_state (obj, variant);
+        g_variant_unref (variant);
+        _atspi_accessible_add_cache (obj, ATSPI_CACHE_STATES);
+      }
   }
 
   return g_object_ref (obj->states);
@@ -602,9 +590,7 @@ atspi_accessible_get_state_set (AtspiAccessible *obj)
 GHashTable *
 atspi_accessible_get_attributes (AtspiAccessible *obj, GError **error)
 {
-  DBusMessage *message;
-
-    g_return_val_if_fail (obj != NULL, NULL);
+  g_return_val_if_fail (obj != NULL, NULL);
 
   if (obj->priv->cache)
   {
@@ -615,10 +601,15 @@ atspi_accessible_get_attributes (AtspiAccessible *obj, GError **error)
 
   if (!_atspi_accessible_test_cache (obj, ATSPI_CACHE_ATTRIBUTES))
   {
-    message = _atspi_dbus_call_partial (obj, atspi_interface_accessible,
-                                        "GetAttributes", error, "");
-    obj->attributes = _atspi_dbus_return_hash_from_message (message);
-    _atspi_accessible_add_cache (obj, ATSPI_CACHE_ATTRIBUTES);
+    GVariant *variant = NULL;
+
+    if (a11y_atspi_accessible_call_get_attributes_sync (obj->priv->accessible_proxy,
+                                                        &variant, NULL, error))
+      {
+        obj->attributes = _atspi_dbus_return_hash_from_variant (variant);
+        _atspi_accessible_add_cache (obj, ATSPI_CACHE_ATTRIBUTES);
+        g_variant_unref (variant);
+      }
   }
 
   if (!obj->attributes)
@@ -649,24 +640,31 @@ add_to_attribute_array (gpointer key, gpointer value, gpointer data)
 GArray *
 atspi_accessible_get_attributes_as_array (AtspiAccessible *obj, GError **error)
 {
-  DBusMessage *message;
+  GArray *array = NULL;
+  GVariant *variant = NULL;
 
-    g_return_val_if_fail (obj != NULL, NULL);
+  g_return_val_if_fail (obj != NULL, NULL);
 
   if (obj->priv->cache)
   {
     GValue *val = g_hash_table_lookup (obj->priv->cache, "Attributes");
     if (val)
     {
-      GArray *array = g_array_new (TRUE, TRUE, sizeof (gchar *));
+      array = g_array_new (TRUE, TRUE, sizeof (gchar *));
       GHashTable *attributes = g_value_get_boxed (val);
       g_hash_table_foreach (attributes, add_to_attribute_array, &array);
       return array;
     }
   }
 
-  message = _atspi_dbus_call_partial (obj, atspi_interface_accessible, "GetAttributes", error, "");
-  return _atspi_dbus_return_attribute_array_from_message (message);
+  if (a11y_atspi_accessible_call_get_attributes_sync (obj->priv->accessible_proxy,
+                                                      &variant, NULL, error))
+    {
+      array = _atspi_dbus_return_attribute_array_from_variant (variant);
+      g_variant_unref (variant);
+    }
+
+  return array;
 }
 
 /**
@@ -733,11 +731,7 @@ atspi_accessible_get_toolkit_name (AtspiAccessible *obj, GError **error)
   if (!obj->parent.app)
     return NULL;
 
-  if (!obj->parent.app->toolkit_name)
-    _atspi_dbus_get_property (obj, atspi_interface_application, "ToolkitName",
-                              error, "s", &obj->parent.app->toolkit_name);
-
-  return g_strdup (obj->parent.app->toolkit_name);
+  return a11y_atspi_application_dup_toolkit_name (atspi_application_get_application_proxy (obj->parent.app));
 }
 
 /**
@@ -757,11 +751,7 @@ atspi_accessible_get_toolkit_version (AtspiAccessible *obj, GError **error)
   if (!obj->parent.app)
     return NULL;
 
-  if (!obj->parent.app->toolkit_version)
-    _atspi_dbus_get_property (obj, atspi_interface_application, "Version",
-                              error, "s", &obj->parent.app->toolkit_version);
-
-  return g_strdup (obj->parent.app->toolkit_version);
+  return a11y_atspi_application_dup_toolkit_version (atspi_application_get_application_proxy (obj->parent.app));
 }
 
 /**
@@ -782,11 +772,7 @@ atspi_accessible_get_atspi_version (AtspiAccessible *obj, GError **error)
   if (!obj->parent.app)
     return NULL;
 
-  if (!obj->parent.app->atspi_version)
-    _atspi_dbus_get_property (obj, atspi_interface_application, "AtspiVersion",
-                              error, "s", &obj->parent.app->atspi_version);
-
-  return g_strdup (obj->parent.app->atspi_version);
+  return a11y_atspi_application_dup_atspi_version (atspi_application_get_application_proxy (obj->parent.app));
 }
 
 /**
@@ -802,13 +788,12 @@ atspi_accessible_get_atspi_version (AtspiAccessible *obj, GError **error)
 gint
 atspi_accessible_get_id (AtspiAccessible *obj, GError **error)
 {
-  gint ret = -1;
-
   g_return_val_if_fail (obj != NULL, -1);
 
-  if (!_atspi_dbus_get_property (obj, atspi_interface_application, "Id", error, "i", &ret))
-      return -1;
-  return ret;
+  if (!obj->parent.app)
+    return -1;
+
+  return a11y_atspi_application_get_id (atspi_application_get_application_proxy (obj->parent.app));
 }
 
 
@@ -827,15 +812,15 @@ _atspi_accessible_is_a (AtspiAccessible *accessible,
 
   if (!_atspi_accessible_test_cache (accessible, ATSPI_CACHE_INTERFACES))
   {
-    DBusMessage *reply;
-    DBusMessageIter iter;
-    reply = _atspi_dbus_call_partial (accessible, atspi_interface_accessible,
-                                      "GetInterfaces", NULL, "");
-    _ATSPI_DBUS_CHECK_SIG (reply, "as", NULL, FALSE);
-    dbus_message_iter_init (reply, &iter);
-    _atspi_dbus_set_interfaces (accessible, &iter);
-    dbus_message_unref (reply);
-    _atspi_accessible_add_cache (accessible, ATSPI_CACHE_INTERFACES);
+    gchar **interfaces = NULL;
+
+    if (a11y_atspi_accessible_call_get_interfaces_sync (accessible->priv->accessible_proxy,
+                                                        &interfaces, NULL, NULL))
+      {
+        _atspi_dbus_set_interfaces (accessible, (const gchar **) interfaces);
+        g_strfreev (interfaces);
+        _atspi_accessible_add_cache (accessible, ATSPI_CACHE_INTERFACES);
+      }
   }
 
   n = _atspi_get_iface_num (interface_name);
@@ -1594,6 +1579,11 @@ _atspi_accessible_new (AtspiApplication *app, const gchar *path)
   accessible->parent.app = g_object_ref (app);
   accessible->parent.path = g_strdup (path);
 
+  accessible->priv->accessible_proxy =
+    a11y_atspi_accessible_proxy_new_sync (g_dbus_proxy_get_connection (G_DBUS_PROXY (atspi_application_get_application_proxy (app))),
+                                          G_DBUS_PROXY_FLAGS_NONE,
+                                          app->bus_name, path, NULL, NULL);
+
   return accessible;
 }
 
@@ -1656,10 +1646,9 @@ atspi_accessible_clear_cache (AtspiAccessible *obj)
 guint
 atspi_accessible_get_process_id (AtspiAccessible *accessible, GError **error)
 {
-  DBusMessage *message, *reply;
-  DBusConnection *bus = _atspi_bus ();
-  dbus_uint32_t pid = -1;
-  DBusError d_error;
+  GDBusConnection *bus = _atspi_bus ();
+  guint32 pid = -1;
+  GVariant *variant;
 
   if (!accessible->parent.app || !accessible->parent.app->bus_name)
     {
@@ -1667,27 +1656,22 @@ atspi_accessible_get_process_id (AtspiAccessible *accessible, GError **error)
       return -1;
     }
 
-  message = dbus_message_new_method_call ("org.freedesktop.DBus",
-                                          "/org/freedesktop/DBus",
-                                          "org.freedesktop.DBus",
-                                          "GetConnectionUnixProcessID");
-  dbus_message_append_args (message, DBUS_TYPE_STRING,
-                            &accessible->parent.app->bus_name,
-                            DBUS_TYPE_INVALID);
-  dbus_error_init (&d_error);
-  reply = dbus_connection_send_with_reply_and_block (bus, message, -1, &d_error);
-  dbus_message_unref (message);
-  if (reply)
-  {
-    if (!strcmp (dbus_message_get_signature (reply), "u"))
-      dbus_message_get_args (reply, NULL, DBUS_TYPE_UINT32, &pid, DBUS_TYPE_INVALID);
-    dbus_message_unref (reply);
-  }
-  if (dbus_error_is_set (&d_error))
+  variant = g_dbus_connection_call_sync (bus,
+                                         "org.freedesktop.DBus",
+                                         "/org/freedesktop/DBus",
+                                         "org.freedesktop.DBus",
+                                         "GetConnectionUnixProcessID",
+                                         g_variant_new_string (accessible->parent.app->bus_name),
+                                         G_VARIANT_TYPE_UINT32,
+                                         G_DBUS_CALL_FLAGS_NONE,
+                                         -1, NULL, error);
+
+  if (variant != NULL)
     {
-      g_set_error_literal(error, ATSPI_ERROR, ATSPI_ERROR_IPC, "Process is defunct");
-      dbus_error_free (&d_error);
+      pid = g_variant_get_uint32 (variant);
+      g_variant_unref (variant);
     }
+
   return pid;
 }
 
@@ -1750,21 +1734,7 @@ _atspi_accessible_add_cache (AtspiAccessible *accessible, AtspiCache flag)
 const gchar*
 atspi_accessible_get_object_locale (AtspiAccessible *accessible, GError **error)
 {
-  gchar *locale;
-
-  g_return_val_if_fail (accessible != NULL, NULL);
-
-  locale = g_object_get_qdata (G_OBJECT (accessible), quark_locale);
-  if (!locale)
-  {
-    if (!_atspi_dbus_get_property (accessible, atspi_interface_accessible,
-                                   "Locale", error, "s", &locale))
-      return NULL;
-    if (locale)
-      g_object_set_qdata_full (G_OBJECT (accessible), quark_locale, locale,
-                               g_free);
-  }
-  return locale;
+  return a11y_atspi_accessible_get_locale (accessible->priv->accessible_proxy);
 }
 
 void
@@ -1774,6 +1744,37 @@ free_value (gpointer data)
 
   g_value_unset (value);
   g_free (value);
+}
+
+gpointer
+atspi_accessible_get_iface_proxy (AtspiAccessible *accessible,
+                                  AtspiAccessibleProxyInit init_func,
+                                  const char *key)
+{
+  gpointer iface_proxy;
+
+  iface_proxy = g_object_get_data (G_OBJECT (accessible), key);
+  if (!iface_proxy)
+    {
+      AtspiApplication *app = accessible->parent.app;
+      iface_proxy =
+        init_func (g_dbus_proxy_get_connection (G_DBUS_PROXY (atspi_application_get_application_proxy (app))),
+                   G_DBUS_PROXY_FLAGS_NONE,
+                   app->bus_name, accessible->parent.path,
+                   NULL, NULL);
+
+      g_object_set_data_full (G_OBJECT (accessible), key,
+                              iface_proxy, g_object_unref);
+    }
+
+  return iface_proxy;
+}
+
+A11yAtspiAccessible *
+_atspi_accessible_get_accessible_proxy (AtspiAccessible *accessible)
+{
+  AtspiAccessiblePrivate *priv = accessible->priv;
+  return priv->accessible_proxy;
 }
 
 GHashTable *

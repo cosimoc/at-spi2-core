@@ -23,6 +23,9 @@
  */
 
 #include "atspi-private.h"
+
+#include "xml/a11y-atspi-text.h"
+
 /**
  * atspi_range_copy:
  * @src: a pointer to the source #AtspiRange object that will be copied.
@@ -64,6 +67,14 @@ atspi_text_range_free (AtspiTextRange *range)
 G_DEFINE_BOXED_TYPE (AtspiTextRange, atspi_text_range, atspi_text_range_copy,
                      atspi_text_range_free)
 
+static A11yAtspiText *
+get_text_proxy (AtspiText *text)
+{
+  return atspi_accessible_get_iface_proxy
+    (ATSPI_ACCESSIBLE (text), (AtspiAccessibleProxyInit) a11y_atspi_text_proxy_new_sync,
+     "a11y-atspi-text-proxy");
+}
+
 /**
  * atspi_text_get_character_count:
  * @obj: a pointer to the #AtspiText object to query.
@@ -76,13 +87,9 @@ G_DEFINE_BOXED_TYPE (AtspiTextRange, atspi_text_range, atspi_text_range_copy,
 gint
 atspi_text_get_character_count (AtspiText *obj, GError **error)
 {
-  dbus_int32_t retval = 0;
-
   g_return_val_if_fail (obj != NULL, -1);
 
-  _atspi_dbus_get_property (obj, atspi_interface_text, "CharacterCount", error, "i", &retval);
-
-  return retval;
+  return a11y_atspi_text_get_character_count (get_text_proxy (obj));
 }
 
 /**
@@ -105,12 +112,11 @@ atspi_text_get_text (AtspiText *obj,
                         GError **error)
 {
   gchar *retval = NULL;
-  dbus_int32_t d_start_offset = start_offset, d_end_offset = end_offset;
 
   g_return_val_if_fail (obj != NULL, g_strdup (""));
 
-  _atspi_dbus_call (obj, atspi_interface_text, "GetText", error, "ii=>s", d_start_offset, d_end_offset, &retval);
-
+  a11y_atspi_text_call_get_text_sync (get_text_proxy (obj), start_offset, end_offset,
+                                      &retval, NULL, error);
   if (!retval)
     retval = g_strdup ("");
 
@@ -128,13 +134,9 @@ atspi_text_get_text (AtspiText *obj,
 gint
 atspi_text_get_caret_offset (AtspiText *obj, GError **error)
 {
-  dbus_int32_t retval = -1;
-
   g_return_val_if_fail (obj != NULL, -1);
 
-  _atspi_dbus_get_property (obj, atspi_interface_text, "CaretOffset", error, "i", &retval);
-
-  return retval;
+  return a11y_atspi_text_get_caret_offset (get_text_proxy (obj));
 }
 
 /**
@@ -192,31 +194,19 @@ atspi_text_get_text_attributes (AtspiText *obj,
 			   gint *end_offset,
 			   GError **error)
 {
-  dbus_int32_t d_offset = offset;
-  dbus_int32_t d_start_offset, d_end_offset;
-  DBusMessage *reply;
-  DBusMessageIter iter;
+  GVariant *variant = NULL;
   GHashTable *ret = NULL;
 
-  if (obj == NULL)
-   return NULL;
+  g_return_val_if_fail (obj != NULL, NULL);
 
-  reply = _atspi_dbus_call_partial (obj, atspi_interface_text, "GetAttributes", error, "i", d_offset);
-  _ATSPI_DBUS_CHECK_SIG (reply, "a{ss}ii", error, ret)
+  if (a11y_atspi_text_call_get_attributes_sync (get_text_proxy (obj), offset,
+                                                &variant, start_offset, end_offset,
+                                                NULL, error))
+    {
+      ret = _atspi_dbus_return_hash_from_variant (variant);
+      g_variant_unref (variant);
+    }
 
-  dbus_message_iter_init (reply, &iter);
-  ret = _atspi_dbus_hash_from_iter (&iter);
-  dbus_message_iter_next (&iter);
-
-  dbus_message_iter_get_basic (&iter, &d_start_offset);
-  if (start_offset)
-    *start_offset = d_start_offset;
-  dbus_message_iter_next (&iter);
-  dbus_message_iter_get_basic (&iter, &d_end_offset);
-  if (end_offset)
-    *end_offset = d_end_offset;
-
-  dbus_message_unref (reply);
   return ret;
 }
 
@@ -248,33 +238,19 @@ atspi_text_get_attribute_run (AtspiText *obj,
 			      gint *end_offset,
 			      GError **error)
 {
-  dbus_int32_t d_offset = offset;
-  dbus_int32_t d_start_offset, d_end_offset;
-  DBusMessage *reply;
-  DBusMessageIter iter;
+  GVariant *variant = NULL;
   GHashTable *ret = NULL;
 
-  if (obj == NULL)
-   return NULL;
+  g_return_val_if_fail (obj != NULL, NULL);
 
-  reply = _atspi_dbus_call_partial (obj, atspi_interface_text,
-                                    "GetAttributeRun", error, "ib", d_offset,
-                                    include_defaults);
-  _ATSPI_DBUS_CHECK_SIG (reply, "a{ss}ii", error, ret)
+  if (a11y_atspi_text_call_get_attribute_run_sync (get_text_proxy (obj), offset, include_defaults,
+                                                   &variant, start_offset, end_offset,
+                                                   NULL, error))
+    {
+      ret = _atspi_dbus_return_hash_from_variant (variant);
+      g_variant_unref (variant);
+    }
 
-  dbus_message_iter_init (reply, &iter);
-  ret = _atspi_dbus_hash_from_iter (&iter);
-  dbus_message_iter_next (&iter);
-
-  dbus_message_iter_get_basic (&iter, &d_start_offset);
-  if (start_offset)
-    *start_offset = d_start_offset;
-  dbus_message_iter_next (&iter);
-  dbus_message_iter_get_basic (&iter, &d_end_offset);
-  if (end_offset)
-    *end_offset = d_end_offset;
-
-  dbus_message_unref (reply);
   return ret;
 }
 
@@ -315,16 +291,15 @@ atspi_text_get_attribute_value (AtspiText *obj,
 gchar *
 atspi_text_get_text_attribute_value (AtspiText *obj,
                                      gint offset,
-                                     gchar *attribute_value,
+                                     gchar *attribute_name,
                                      GError **error)
 {
   gchar *retval = NULL;
-  dbus_int32_t d_i = offset;
 
   g_return_val_if_fail (obj != NULL, NULL);
 
-  _atspi_dbus_call (obj, atspi_interface_text, "GetAttributeValue", error, "is=>s", d_i, (const gchar *)attribute_value, &retval);
-
+  a11y_atspi_text_call_get_attribute_value_sync (get_text_proxy (obj), offset, attribute_name,
+                                                 &retval, NULL, error);
   if (!retval)
     retval = g_strdup ("");
 
@@ -348,12 +323,19 @@ atspi_text_get_text_attribute_value (AtspiText *obj,
 GHashTable *
 atspi_text_get_default_attributes (AtspiText *obj, GError **error)
 {
-  DBusMessage *reply;
+  GVariant *variant = NULL;
+  GHashTable *ret = NULL;
 
-    g_return_val_if_fail (obj != NULL, NULL);
+  g_return_val_if_fail (obj != NULL, NULL);
 
-  reply = _atspi_dbus_call_partial (obj, atspi_interface_text, "GetDefaultAttributes", error, "");
-  return _atspi_dbus_return_hash_from_message (reply);
+  if (a11y_atspi_text_call_get_default_attributes_sync (get_text_proxy (obj),
+                                                        &variant, NULL, error))
+    {
+      ret = _atspi_dbus_return_hash_from_variant (variant);
+      g_variant_unref (variant);
+    }
+
+  return ret;
 }
 
 
@@ -371,13 +353,12 @@ atspi_text_set_caret_offset (AtspiText *obj,
                                gint new_offset,
                                GError **error)
 {
-  dbus_int32_t d_new_offset = new_offset;
-  dbus_bool_t retval = FALSE;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_text, "SetCaretOffset", error, "i=>b", d_new_offset, &retval);
-
+  a11y_atspi_text_call_set_caret_offset_sync (get_text_proxy (obj), new_offset,
+                                              &retval, NULL, error);
   return retval;
 }
 
@@ -402,21 +383,18 @@ atspi_text_get_text_before_offset (AtspiText *obj,
                                     AtspiTextBoundaryType type,
                                     GError **error)
 {
-  dbus_int32_t d_offset = offset;
-  dbus_uint32_t d_type = type;
-  dbus_int32_t d_start_offset = -1, d_end_offset = -1;
-  AtspiTextRange *range = g_new0 (AtspiTextRange, 1);
+  AtspiTextRange *range;
 
+  range = g_new0 (AtspiTextRange, 1);
   range->start_offset = range->end_offset = -1;
-  if (!obj)
-    return range;
 
-  _atspi_dbus_call (obj, atspi_interface_text, "GetTextBeforeOffset", error,
-                    "iu=>sii", d_offset, d_type, &range->content,
-                    &d_start_offset, &d_end_offset);
+  g_return_val_if_fail (obj != NULL, range);
 
-  range->start_offset = d_start_offset;
-  range->end_offset = d_end_offset;
+  a11y_atspi_text_call_get_text_before_offset_sync (get_text_proxy (obj),
+                                                    offset, type,
+                                                    &range->content,
+                                                    &range->start_offset, &range->end_offset,
+                                                    NULL, error);
   if (!range->content)
     range->content = g_strdup ("");
 
@@ -472,21 +450,18 @@ atspi_text_get_string_at_offset (AtspiText *obj,
                                  AtspiTextGranularity granularity,
                                  GError **error)
 {
-  dbus_int32_t d_offset = offset;
-  dbus_uint32_t d_granularity = granularity;
-  dbus_int32_t d_start_offset = -1, d_end_offset = -1;
-  AtspiTextRange *range = g_new0 (AtspiTextRange, 1);
+  AtspiTextRange *range;
 
+  range = g_new0 (AtspiTextRange, 1);
   range->start_offset = range->end_offset = -1;
-  if (!obj)
-    return range;
 
-  _atspi_dbus_call (obj, atspi_interface_text, "GetStringAtOffset", error,
-                    "iu=>sii", d_offset, d_granularity, &range->content,
-                    &d_start_offset, &d_end_offset);
+  g_return_val_if_fail (obj != NULL, range);
 
-  range->start_offset = d_start_offset;
-  range->end_offset = d_end_offset;
+  a11y_atspi_text_call_get_string_at_offset_sync (get_text_proxy (obj),
+                                                  offset, granularity,
+                                                  &range->content,
+                                                  &range->start_offset, &range->end_offset,
+                                                  NULL, error);
   if (!range->content)
     range->content = g_strdup ("");
 
@@ -516,21 +491,18 @@ atspi_text_get_text_at_offset (AtspiText *obj,
                                     AtspiTextBoundaryType type,
                                     GError **error)
 {
-  dbus_int32_t d_offset = offset;
-  dbus_uint32_t d_type = type;
-  dbus_int32_t d_start_offset = -1, d_end_offset = -1;
-  AtspiTextRange *range = g_new0 (AtspiTextRange, 1);
+  AtspiTextRange *range;
 
+  range = g_new0 (AtspiTextRange, 1);
   range->start_offset = range->end_offset = -1;
-  if (!obj)
-    return range;
 
-  _atspi_dbus_call (obj, atspi_interface_text, "GetTextAtOffset", error,
-                    "iu=>sii", d_offset, d_type, &range->content,
-                    &d_start_offset, &d_end_offset);
+  g_return_val_if_fail (obj != NULL, range);
 
-  range->start_offset = d_start_offset;
-  range->end_offset = d_end_offset;
+  a11y_atspi_text_call_get_text_at_offset_sync (get_text_proxy (obj),
+                                                offset, type,
+                                                &range->content,
+                                                &range->start_offset, &range->end_offset,
+                                                NULL, error);
   if (!range->content)
     range->content = g_strdup ("");
 
@@ -559,21 +531,18 @@ atspi_text_get_text_after_offset (AtspiText *obj,
                                     AtspiTextBoundaryType type,
                                     GError **error)
 {
-  dbus_int32_t d_offset = offset;
-  dbus_uint32_t d_type = type;
-  dbus_int32_t d_start_offset = -1, d_end_offset = -1;
-  AtspiTextRange *range = g_new0 (AtspiTextRange, 1);
+  AtspiTextRange *range;
 
+  range = g_new0 (AtspiTextRange, 1);
   range->start_offset = range->end_offset = -1;
-  if (!obj)
-    return range;
 
-  _atspi_dbus_call (obj, atspi_interface_text, "GetTextAfterOffset", error,
-                    "iu=>sii", d_offset, d_type, &range->content,
-                    &d_start_offset, &d_end_offset);
+  g_return_val_if_fail (obj != NULL, range);
 
-  range->start_offset = d_start_offset;
-  range->end_offset = d_end_offset;
+  a11y_atspi_text_call_get_text_after_offset_sync (get_text_proxy (obj),
+                                                   offset, type,
+                                                   &range->content,
+                                                   &range->start_offset, &range->end_offset,
+                                                   NULL, error);
   if (!range->content)
     range->content = g_strdup ("");
 
@@ -598,13 +567,12 @@ atspi_text_get_character_at_offset (AtspiText *obj,
                                      gint offset,
                                      GError **error)
 {
-  dbus_int32_t d_offset = offset;
-  dbus_int32_t retval = -1;
+  gint retval = -1;
 
   g_return_val_if_fail (obj != NULL, -1);
 
-  _atspi_dbus_call (obj, atspi_interface_text, "GetCharacterAtOffset", error, "i=>i", d_offset, &retval);
-
+  a11y_atspi_text_call_get_character_at_offset_sync (get_text_proxy (obj), offset,
+                                                     &retval, NULL, error);
   return retval;
 }
 
@@ -628,22 +596,16 @@ atspi_text_get_character_extents (AtspiText *obj,
 				    AtspiCoordType type,
 				    GError **error)
 {
-  dbus_int32_t d_offset = offset;
-  dbus_uint32_t d_type = type;
-  dbus_int32_t d_x, d_y, d_width, d_height;
   AtspiRect ret;
 
   ret.x = ret.y = ret.width = ret.height = -1;
 
-  if (obj == NULL)
-    return atspi_rect_copy (&ret);
+  g_return_val_if_fail (obj != NULL, atspi_rect_copy (&ret));
 
-  _atspi_dbus_call (obj, atspi_interface_text, "GetCharacterExtents", error, "iu=>iiii", d_offset, d_type, &d_x, &d_y, &d_width, &d_height);
-
-  ret.x = d_x;
-  ret.y = d_y;
-  ret.width = d_width;
-  ret.height = d_height;
+  a11y_atspi_text_call_get_character_extents_sync (get_text_proxy (obj),
+                                                   offset, type,
+                                                   &ret.x, &ret.y, &ret.width, &ret.height,
+                                                   NULL, error);
   return atspi_rect_copy (&ret);
 }
 
@@ -668,14 +630,13 @@ atspi_text_get_offset_at_point (AtspiText *obj,
 				 AtspiCoordType type,
 				 GError **error)
 {
-  dbus_int32_t d_x = x, d_y = y;
-  dbus_uint32_t d_type = type;
-  dbus_int32_t retval = -1;
+  gint retval = -1;
 
   g_return_val_if_fail (obj != NULL, -1);
 
-  _atspi_dbus_call (obj, atspi_interface_text, "GetOffsetAtPoint", error, "iiu=>i", d_x, d_y, d_type, &retval);
-
+  a11y_atspi_text_call_get_offset_at_point_sync (get_text_proxy (obj),
+                                                 x, y, type,
+                                                 &retval, NULL, error);
   return retval;
 }
 
@@ -702,22 +663,16 @@ atspi_text_get_range_extents (AtspiText *obj,
 				AtspiCoordType type,
 				GError **error)
 {
-  dbus_int32_t d_start_offset = start_offset, d_end_offset = end_offset;
-  dbus_uint32_t d_type = type;
-  dbus_int32_t d_x, d_y, d_width, d_height;
   AtspiRect ret;
 
   ret.x = ret.y = ret.width = ret.height = -1;
 
-  if (obj == NULL)
-    return atspi_rect_copy (&ret);
+  g_return_val_if_fail (obj != NULL, atspi_rect_copy (&ret));
 
-  _atspi_dbus_call (obj, atspi_interface_text, "GetRangeExtents", error, "iiu=>iiii", d_start_offset, d_end_offset, d_type, &d_x, &d_y, &d_width, &d_height);
-
-  ret.x = d_x;
-  ret.y = d_y;
-  ret.width = d_width;
-  ret.height = d_height;
+  a11y_atspi_text_call_get_range_extents_sync (get_text_proxy (obj),
+                                               start_offset, end_offset, type,
+                                               &ret.x, &ret.y, &ret.width, &ret.height,
+                                               NULL, error);
   return atspi_rect_copy (&ret);
 }
 
@@ -752,14 +707,34 @@ atspi_text_get_bounded_ranges (AtspiText *obj,
 				 AtspiTextClipType clipTypeY,
 				 GError **error)
 {
-  dbus_int32_t d_x = x, d_y = y, d_width = width, d_height = height;
-  dbus_uint32_t d_type = type;
-  dbus_uint32_t d_clipTypeX = clipTypeX, d_clipTypeY = clipTypeY;
   GArray *range_seq = NULL;
+  GVariant *variant = NULL;
 
   g_return_val_if_fail (obj != NULL, NULL);
 
-  _atspi_dbus_call (obj, atspi_interface_text, "GetBoundedRanges", error, "iiiiuuu=>a(iisv)", d_x, d_y, d_width, d_height, d_type, d_clipTypeX, d_clipTypeY, &range_seq);
+  if (a11y_atspi_text_call_get_bounded_ranges_sync (get_text_proxy (obj),
+                                                    x, y, width, height,
+                                                    type, clipTypeX, clipTypeY,
+                                                    &variant, NULL, error))
+    {
+      GVariant *value;
+      GVariantIter iter;
+
+      range_seq = g_array_new (TRUE, TRUE, sizeof (AtspiTextRange *));
+
+      g_variant_iter_init (&iter, variant);
+      while ((value = g_variant_iter_next_value (&iter)))
+        {
+          AtspiTextRange *range = g_new0 (AtspiTextRange, 1);
+          g_variant_get (value, "(iisv)",
+                         &range->start_offset, &range->end_offset,
+                         &range->content, NULL);
+          g_array_append_val (range_seq, range);
+          g_variant_unref (value);
+        }
+
+      g_variant_unref (variant);
+    }
 
   return range_seq;
 }
@@ -778,12 +753,12 @@ atspi_text_get_bounded_ranges (AtspiText *obj,
 gint
 atspi_text_get_n_selections (AtspiText *obj, GError **error)
 {
-  dbus_int32_t retval = 0;
+  gint retval = 0;
 
   g_return_val_if_fail (obj != NULL, -1);
 
-  _atspi_dbus_call (obj, atspi_interface_text, "GetNSelections", error, "=>i", &retval);
-
+  a11y_atspi_text_call_get_nselections_sync (get_text_proxy (obj),
+                                             &retval, NULL, error);
   return retval;
 }
 
@@ -800,19 +775,16 @@ atspi_text_get_selection (AtspiText *obj,
 			     gint selection_num,
 			     GError **error)
 {
-  dbus_int32_t d_selection_num = selection_num;
-  dbus_int32_t d_start_offset, d_end_offset;
   AtspiRange *ret = g_new (AtspiRange, 1);
 
   ret->start_offset = ret->end_offset = -1;
 
-  if (!obj)
-    return ret;
+  g_return_val_if_fail (obj != NULL, ret);
 
-  _atspi_dbus_call (obj, atspi_interface_text, "GetSelection", error, "i=>ii", d_selection_num, &d_start_offset, &d_end_offset);
-
-  ret->start_offset = d_start_offset;
-  ret->end_offset = d_end_offset;
+  a11y_atspi_text_call_get_selection_sync (get_text_proxy (obj),
+                                           selection_num,
+                                           &ret->start_offset, &ret->end_offset,
+                                           NULL, error);
   return ret;
 }
 
@@ -831,11 +803,14 @@ atspi_text_add_selection (AtspiText *obj,
 			     gint start_offset, gint end_offset,
 			     GError **error)
 {
-  dbus_int32_t d_start_offset = start_offset, d_end_offset = end_offset;
-  dbus_bool_t retval = FALSE;
+  gboolean retval = FALSE;
 
-  _atspi_dbus_call (obj, atspi_interface_text, "AddSelection", error, "ii=>b", d_start_offset, d_end_offset, &retval);
+  g_return_val_if_fail (obj != NULL, FALSE);
 
+  a11y_atspi_text_call_add_selection_sync (get_text_proxy (obj),
+                                           start_offset, end_offset,
+                                           &retval,
+                                           NULL, error);
   return retval;
 }
 
@@ -853,13 +828,14 @@ atspi_text_remove_selection (AtspiText *obj,
 				gint selection_num,
 				GError **error)
 {
-  dbus_int32_t d_selection_num = selection_num;
-  dbus_bool_t retval = FALSE;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_text, "RemoveSelection", error, "i=>b", d_selection_num, &retval);
-
+  a11y_atspi_text_call_remove_selection_sync (get_text_proxy (obj),
+                                              selection_num,
+                                              &retval,
+                                              NULL, error);
   return retval;
 }
 
@@ -882,13 +858,14 @@ atspi_text_set_selection (AtspiText *obj,
 			     gint end_offset,
 			     GError **error)
 {
-  dbus_int32_t d_selection_num = selection_num, d_start_offset = start_offset, d_end_offset = end_offset;
-  dbus_bool_t retval = FALSE;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_text, "SetSelection", error, "iii=>b", d_selection_num, d_start_offset, d_end_offset, &retval);
-
+  a11y_atspi_text_call_set_selection_sync (get_text_proxy (obj),
+                                           selection_num, start_offset, end_offset,
+                                           &retval,
+                                           NULL, error);
   return retval;
 }
 

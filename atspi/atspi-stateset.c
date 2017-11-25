@@ -114,21 +114,23 @@ atspi_state_set_set_by_name (AtspiStateSet *set, const gchar *name, gboolean ena
 static void
 refresh_states (AtspiStateSet *set)
 {
-  GArray *state_array;
-  dbus_uint32_t *states;
+  gsize length;
+  GVariant *variant;
+  const guint32 *states;
 
   if (!set->accessible ||
       (set->accessible->cached_properties & ATSPI_CACHE_STATES))
     return;
 
-  if (!_atspi_dbus_call (set->accessible, atspi_interface_accessible, "GetState", NULL, "=>au", &state_array))
+  variant = _atspi_accessible_get_state (set->accessible);
+  if (!variant)
     return;
 
-  states = (dbus_uint32_t *) state_array->data;
+  states = g_variant_get_fixed_array (variant, &length, sizeof (guint32));
 
   set->states = ((gint64)states [1]) << 32;
   set->states |= (gint64) states [0];
-  g_array_free (state_array, TRUE);
+  g_variant_unref (variant);
 }
 
 /**

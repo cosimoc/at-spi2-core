@@ -28,18 +28,14 @@
 
 #include "atspi-event-listener.h"
 
-#include "dbus/dbus.h"
-
 G_BEGIN_DECLS
-
-DBusHandlerResult _atspi_dbus_handle_Event (DBusConnection *bus, DBusMessage *message, void *data);
 
 void _atspi_send_event (AtspiEvent *e);
 
-DBusHandlerResult _atspi_dbus_handle_event (DBusConnection *bus, DBusMessage *message, void *data);
-
 void
 _atspi_reregister_event_listeners ();
+
+void _atspi_register_default_event_listeners (void);
 
 G_END_DECLS
 

@@ -23,6 +23,8 @@
 
 #include "atspi-private.h"
 
+#include "xml/a11y-atspi-collection.h"
+
 /* TODO: Improve documentation and implement some missing functions */
 
 /**
@@ -40,62 +42,30 @@ atspi_collection_is_ancestor_of (AtspiCollection *collection,
   return FALSE;
 }
 
-static DBusMessage *
-new_message (AtspiCollection *collection, char *method)
+static A11yAtspiCollection *
+get_collection_proxy (AtspiCollection *collection)
 {
-  AtspiAccessible *accessible;
-
-  if (!collection)
-    return NULL;
-
-  accessible = ATSPI_ACCESSIBLE (collection);
-  if (!accessible->parent.app)
-    return NULL;
-  return dbus_message_new_method_call (accessible->parent.app->bus_name,
-                                       accessible->parent.path,
-                                       atspi_interface_collection,
-                                       method);
-}
-
-static gboolean
-append_match_rule (DBusMessage *message, AtspiMatchRule *rule)
-{
-  DBusMessageIter iter;
-
-  dbus_message_iter_init_append (message, &iter);
-  return _atspi_match_rule_marshal (rule, &iter);
-}
-
-static gboolean
-append_accessible (DBusMessage *message, AtspiAccessible *accessible)
-{
-  DBusMessageIter iter;
-
-  dbus_message_iter_init_append (message, &iter);
-  dbus_message_iter_append_basic (&iter, DBUS_TYPE_OBJECT_PATH,
-                                  &accessible->parent.path);
-  return TRUE;	/* TODO: Check for out-of-memory */
+  return atspi_accessible_get_iface_proxy
+    (ATSPI_ACCESSIBLE (collection), (AtspiAccessibleProxyInit) a11y_atspi_collection_proxy_new_sync,
+     "a11y-atspi-collection-proxy");
 }
 
 static GArray *
-return_accessibles (DBusMessage *message)
+return_accessibles (GVariant *variant)
 {
-  DBusMessageIter iter, iter_array;
+  GVariant *value;
+  GVariantIter iter;
   GArray *ret = g_array_new (TRUE, TRUE, sizeof (AtspiAccessible *));
 
-  _ATSPI_DBUS_CHECK_SIG (message, "a(so)", NULL, NULL);
+  //_ATSPI_DBUS_CHECK_SIG (message, "a(so)", NULL, NULL);
 
-  dbus_message_iter_init (message, &iter);
-  dbus_message_iter_recurse (&iter, &iter_array);
-
-  while (dbus_message_iter_get_arg_type (&iter_array) != DBUS_TYPE_INVALID)
-  {
-    AtspiAccessible *accessible;
-    accessible = _atspi_dbus_return_accessible_from_iter (&iter_array);
-    ret = g_array_append_val (ret, accessible);
-    /* Iter was moved already, so no need to call dbus_message_iter_next */
-  }
-  dbus_message_unref (message);
+  g_variant_iter_init (&iter, variant);
+  while ((value = g_variant_iter_next_value (&iter)))
+    {
+      AtspiAccessible *accessible = _atspi_dbus_return_accessible_from_variant (value);
+      ret = g_array_append_val (ret, accessible);
+      g_variant_unref (value);
+    }
   return ret;
 }
 
@@ -122,25 +92,23 @@ atspi_collection_get_matches (AtspiCollection *collection,
                               gboolean traverse,
                               GError **error)
 {
-  DBusMessage *message = new_message (collection, "GetMatches");
-  DBusMessage *reply;
-  dbus_int32_t d_sortby = sortby;
-  dbus_int32_t d_count = count;
-  dbus_bool_t d_traverse = traverse;
+  A11yAtspiCollection *collection_proxy = get_collection_proxy (collection);
+  GVariant *rule_variant = _atspi_match_rule_to_variant (rule), *variant = NULL;
+  GArray *accessibles = NULL;
+  gboolean res;
 
-  if (!message)
-    return NULL;
+  res = a11y_atspi_collection_call_get_matches_sync (collection_proxy, rule_variant,
+                                                     sortby, count, traverse,
+                                                     &variant, NULL, error);
+  g_variant_unref (rule_variant);
 
-  if (!append_match_rule (message, rule))
-    return NULL;
-  dbus_message_append_args (message, DBUS_TYPE_UINT32, &d_sortby,
-                            DBUS_TYPE_INT32, &d_count,
-                            DBUS_TYPE_BOOLEAN, &d_traverse,
-                            DBUS_TYPE_INVALID);
-  reply = _atspi_dbus_send_with_reply_and_block (message, error);
-  if (!reply)
-    return NULL;
-  return return_accessibles (reply);
+  if (res)
+    {
+      accessibles = return_accessibles (variant);
+      g_variant_unref (variant);
+    }
+
+  return accessibles;
 }
 
 /**
@@ -177,31 +145,24 @@ atspi_collection_get_matches_to (AtspiCollection *collection,
                               gboolean traverse,
                               GError **error)
 {
-  DBusMessage *message = new_message (collection, "GetMatchesTo");
-  DBusMessage *reply;
-  dbus_int32_t d_sortby = sortby;
-  dbus_int32_t d_tree = tree;
-  dbus_bool_t d_limit_scope = limit_scope;
-  dbus_int32_t d_count = count;
-  dbus_bool_t d_traverse = traverse;
+  A11yAtspiCollection *collection_proxy = get_collection_proxy (collection);
+  GVariant *rule_variant = _atspi_match_rule_to_variant (rule), *variant = NULL;
+  GArray *accessibles = NULL;
+  gboolean res;
 
-  if (!message)
-    return NULL;
+  res = a11y_atspi_collection_call_get_matches_to_sync (collection_proxy, current_object->parent.path,
+                                                        rule_variant, sortby, tree,
+                                                        limit_scope, count, traverse,
+                                                        &variant, NULL, error);
+  g_variant_unref (rule_variant);
 
-  if (!append_accessible (message, current_object))
-    return NULL;
-  if (!append_match_rule (message, rule))
-    return NULL;
-  dbus_message_append_args (message, DBUS_TYPE_UINT32, &d_sortby,
-                                     DBUS_TYPE_UINT32, &d_tree,
-                            DBUS_TYPE_BOOLEAN, &d_limit_scope,
-                            DBUS_TYPE_INT32, &d_count,
-                            DBUS_TYPE_BOOLEAN, &d_traverse,
-                            DBUS_TYPE_INVALID);
-  reply = _atspi_dbus_send_with_reply_and_block (message, error);
-  if (!reply)
-    return NULL;
-  return return_accessibles (reply);
+  if (res)
+    {
+      accessibles = return_accessibles (variant);
+      g_variant_unref (variant);
+    }
+
+  return accessibles;
 }
 
 /**
@@ -233,29 +194,24 @@ atspi_collection_get_matches_from (AtspiCollection *collection,
                               gboolean traverse,
                               GError **error)
 {
-  DBusMessage *message = new_message (collection, "GetMatchesFrom");
-  DBusMessage *reply;
-  dbus_int32_t d_sortby = sortby;
-  dbus_int32_t d_tree = tree;
-  dbus_int32_t d_count = count;
-  dbus_bool_t d_traverse = traverse;
+  A11yAtspiCollection *collection_proxy = get_collection_proxy (collection);
+  GVariant *rule_variant = _atspi_match_rule_to_variant (rule), *variant = NULL;
+  GArray *accessibles = NULL;
+  gboolean res;
 
-  if (!message)
-    return NULL;
+  res = a11y_atspi_collection_call_get_matches_from_sync (collection_proxy, current_object->parent.path,
+                                                          rule_variant, sortby, tree,
+                                                          count, traverse,
+                                                          &variant, NULL, error);
+  g_variant_unref (rule_variant);
 
-  if (!append_accessible (message, current_object))
-    return NULL;
-  if (!append_match_rule (message, rule))
-    return NULL;
-  dbus_message_append_args (message, DBUS_TYPE_UINT32, &d_sortby,
-                            DBUS_TYPE_UINT32, &d_tree,
-                            DBUS_TYPE_INT32, &d_count,
-                            DBUS_TYPE_BOOLEAN, &d_traverse,
-                            DBUS_TYPE_INVALID);
-  reply = _atspi_dbus_send_with_reply_and_block (message, error);
-  if (!reply)
-    return NULL;
-  return return_accessibles (reply);
+  if (res)
+    {
+      accessibles = return_accessibles (variant);
+      g_variant_unref (variant);
+    }
+
+  return accessibles;
 }
 
 /**

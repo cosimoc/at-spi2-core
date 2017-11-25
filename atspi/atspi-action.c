@@ -23,6 +23,16 @@
 
 #include "atspi-private.h"
 
+#include "xml/a11y-atspi-action.h"
+
+static A11yAtspiAction *
+get_action_proxy (AtspiAction *action)
+{
+  return atspi_accessible_get_iface_proxy
+    (ATSPI_ACCESSIBLE (action), (AtspiAccessibleProxyInit) a11y_atspi_action_proxy_new_sync,
+     "a11y-atspi-action-proxy");
+}
+
 /**
  * atspi_action_get_n_actions:
  * @obj: a pointer to the #AtspiAction to query.
@@ -34,13 +44,9 @@
 gint
 atspi_action_get_n_actions (AtspiAction *obj, GError **error)
 {
-  dbus_int32_t retval = 0;
-
   g_return_val_if_fail (obj != NULL, -1);
 
-  _atspi_dbus_get_property (obj, atspi_interface_action, "NActions", error, "i", &retval);
-
-  return retval;
+  return a11y_atspi_action_get_nactions (get_action_proxy (obj));
 }
 
 /**
@@ -74,13 +80,12 @@ atspi_action_get_description (AtspiAction *obj, int i, GError **error)
 gchar *
 atspi_action_get_action_description (AtspiAction *obj, int i, GError **error)
 {
-  dbus_int32_t d_i = i;
   char *retval = NULL;
 
   g_return_val_if_fail (obj != NULL, NULL);
 
-  _atspi_dbus_call (obj, atspi_interface_action, "GetDescription", error, "i=>s", d_i, &retval);
-
+  a11y_atspi_action_call_get_description_sync (get_action_proxy (obj),
+                                               i, &retval, NULL, error);
   return retval;
 }
 
@@ -117,13 +122,12 @@ atspi_action_get_action_description (AtspiAction *obj, int i, GError **error)
 gchar *
 atspi_action_get_key_binding (AtspiAction *obj, gint i, GError **error)
 {
-  dbus_int32_t d_i = i;
   char *retval = NULL;
 
   g_return_val_if_fail (obj != NULL, NULL);
 
-  _atspi_dbus_call (obj, atspi_interface_action, "GetKeyBinding", error, "i=>s", d_i, &retval);
-
+  a11y_atspi_action_call_get_key_binding_sync (get_action_proxy (obj),
+                                               i, &retval, NULL, error);
   return retval;
 }
 
@@ -158,13 +162,12 @@ atspi_action_get_name (AtspiAction *obj, gint i, GError **error)
 gchar *
 atspi_action_get_action_name (AtspiAction *obj, gint i, GError **error)
 {
-  dbus_int32_t d_i = i;
   char *retval = NULL;
 
   g_return_val_if_fail (obj != NULL, NULL);
 
-  _atspi_dbus_call (obj, atspi_interface_action, "GetName", error, "i=>s", d_i, &retval);
-
+  a11y_atspi_action_call_get_name_sync (get_action_proxy (obj),
+                                        i, &retval, NULL, error);
   return retval;
 }
 
@@ -181,13 +184,12 @@ atspi_action_get_action_name (AtspiAction *obj, gint i, GError **error)
 gchar *
 atspi_action_get_localized_name (AtspiAction *obj, gint i, GError **error)
 {
-  dbus_int32_t d_i = i;
   char *retval = NULL;
 
   g_return_val_if_fail (obj != NULL, NULL);
 
-  _atspi_dbus_call (obj, atspi_interface_action, "GetLocalizedName", error,
-                    "i=>s", d_i, &retval);
+  a11y_atspi_action_call_get_localized_name_sync (get_action_proxy (obj),
+                                                  i, &retval, NULL, error);
 
   return retval;
 }
@@ -204,13 +206,12 @@ atspi_action_get_localized_name (AtspiAction *obj, gint i, GError **error)
 gboolean
 atspi_action_do_action (AtspiAction *obj, gint i, GError **error)
 {
-  dbus_int32_t d_i = i;
-  dbus_bool_t retval = FALSE;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_action, "DoAction", error, "i=>b", d_i, &retval);
-
+  a11y_atspi_action_call_do_action_sync (get_action_proxy (obj),
+                                         i, &retval, NULL, error);
   return retval;
 }
 

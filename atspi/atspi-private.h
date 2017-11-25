@@ -35,6 +35,7 @@
 
 #include "atspi.h"
 #include "atspi-accessible-private.h"
+#include "atspi-application-private.h"
 
 G_BEGIN_DECLS
 void _atspi_reregister_device_listeners ();

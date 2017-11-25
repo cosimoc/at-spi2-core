@@ -30,10 +30,13 @@ G_BEGIN_DECLS
 
 #include "atspi-accessible.h"
 
+#include "xml/a11y-atspi-accessible.h"
+
 struct _AtspiAccessiblePrivate
 {
   GHashTable *cache;
   guint cache_ref_count;
+  A11yAtspiAccessible *accessible_proxy;
 };
 
 GHashTable *
@@ -41,6 +44,24 @@ _atspi_accessible_ref_cache (AtspiAccessible *accessible);
 
 void
 _atspi_accessible_unref_cache (AtspiAccessible *accessible);
+
+GVariant *
+_atspi_accessible_get_state (AtspiAccessible *accessible);
+
+A11yAtspiAccessible *
+_atspi_accessible_get_accessible_proxy (AtspiAccessible *accessible);
+
+typedef gpointer (* AtspiAccessibleProxyInit) (GDBusConnection *bus,
+                                               GDBusProxyFlags flags,
+                                               const char *bus_name,
+                                               const char *object_path,
+                                               GCancellable *cancellable,
+                                               GError **error);
+gpointer
+atspi_accessible_get_iface_proxy (AtspiAccessible *accessible,
+                                  AtspiAccessibleProxyInit init_func,
+                                  const char *key);
+
 G_END_DECLS
 
 #endif	/* _ATSPI_ACCESSIBLE_H_ */

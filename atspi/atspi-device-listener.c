@@ -23,6 +23,8 @@
  */
 
 #include "atspi-private.h"
+
+#include "xml/a11y-atspi-device-event-listener.h"
 #include <stdio.h>
 
 typedef struct
@@ -32,7 +34,12 @@ typedef struct
   GDestroyNotify callback_destroyed;
 } DeviceEventHandler;
 
-GObjectClass *device_parent_class;
+typedef struct {
+  A11yAtspiDeviceEventListener *listener_skeleton;
+} AtspiDeviceListenerPrivate;
+
+G_DEFINE_TYPE_WITH_PRIVATE (AtspiDeviceListener, atspi_device_listener,
+                            G_TYPE_OBJECT)
 
 /*
  * Misc. helpers.
@@ -161,15 +168,53 @@ atspi_device_event_dispatch (AtspiDeviceListener               *listener,
   return handled;
 }
 
+static gboolean
+handle_notify_event (A11yAtspiDeviceEventListener *skeleton,
+                     GDBusMethodInvocation *invocation,
+                     GVariant *variant,
+                     gpointer user_data)
+{
+  AtspiDeviceListener *listener = user_data;
+  AtspiDeviceListenerClass *klass;
+  AtspiDeviceEvent event;
+  gboolean retval = FALSE;
+
+  g_variant_get (variant, "(uiuuisb)",
+    &event.type,
+    &event.id,
+    &event.hw_code,
+    &event.modifiers,
+    &event.timestamp,
+    &event.event_string,
+    &event.is_text);
+
+  klass = ATSPI_DEVICE_LISTENER_GET_CLASS (listener);
+  if (klass->device_event)
+    retval = (*klass->device_event) (listener, &event);
+
+  a11y_atspi_device_event_listener_complete_notify_event (skeleton, invocation, retval);
+  return TRUE;
+}
+
 static void
 atspi_device_listener_init (AtspiDeviceListener *listener)
 {
+  AtspiDeviceListenerPrivate *priv = atspi_device_listener_get_instance_private (listener);
+  char *path;
 
   do
   {
     listener->id = listener_id++;
   } while (!id_is_free (listener->id));
   device_listeners = g_list_append (device_listeners, listener);
+
+  path = _atspi_device_listener_get_path (listener);
+  priv->listener_skeleton = a11y_atspi_device_event_listener_skeleton_new ();
+  g_signal_connect (priv->listener_skeleton, "handle-notify-event",
+                    G_CALLBACK (handle_notify_event), listener);
+  g_dbus_interface_skeleton_export (G_DBUS_INTERFACE_SKELETON (priv->listener_skeleton),
+                                    _atspi_bus (), path, NULL);
+  g_free (path);
 }
 
 static void
@@ -185,7 +230,7 @@ atspi_device_listener_finalize (GObject *object)
   
   g_list_free (listener->callbacks);
 
-  device_parent_class->finalize (object);
+  G_OBJECT_CLASS (atspi_device_listener_parent_class)->finalize (object);
 }
 
 static void
@@ -193,14 +238,10 @@ atspi_device_listener_class_init (AtspiDeviceListenerClass *klass)
 {
   GObjectClass *object_class = (GObjectClass *) klass;
 
-  device_parent_class = g_type_class_peek_parent (klass);
   object_class->finalize = atspi_device_listener_finalize;
 
   klass->device_event = atspi_device_event_dispatch;
 }
-
-G_DEFINE_TYPE (AtspiDeviceListener, atspi_device_listener,
-			  G_TYPE_OBJECT)
 
 /**
  * atspi_device_listener_new:
@@ -293,105 +334,6 @@ atspi_device_listener_remove_callback (AtspiDeviceListener  *listener,
   g_return_if_fail (ATSPI_IS_DEVICE_LISTENER (listener));
 
   listener->callbacks = event_list_remove_by_cb (listener->callbacks, (void *) callback);
-}
-
-static void
-read_device_event_from_iter (DBusMessageIter *iter, AtspiDeviceEvent *event)
-{
-  dbus_uint32_t type;
-  dbus_int32_t id;
-  dbus_int32_t hw_code;
-  dbus_int32_t modifiers;
-  dbus_int32_t timestamp;
-  dbus_bool_t is_text;
-  DBusMessageIter iter_struct;
-
-  dbus_message_iter_recurse (iter, &iter_struct);
-
-  dbus_message_iter_get_basic (&iter_struct, &type);
-  event->type = type;
-  dbus_message_iter_next (&iter_struct);
-
-  dbus_message_iter_get_basic (&iter_struct, &id);
-  event->id = id;
-  dbus_message_iter_next (&iter_struct);
-
-  /* TODO: Remove cast from next two on ABI break */
-  dbus_message_iter_get_basic (&iter_struct, &hw_code);
-  event->hw_code = (gushort) hw_code;
-  dbus_message_iter_next (&iter_struct);
-
-  dbus_message_iter_get_basic (&iter_struct, &modifiers);
-  event->modifiers = (gushort) modifiers;
-  dbus_message_iter_next (&iter_struct);
-
-  dbus_message_iter_get_basic (&iter_struct, &timestamp);
-  event->timestamp = timestamp;
-  dbus_message_iter_next (&iter_struct);
-
-  dbus_message_iter_get_basic (&iter_struct, &event->event_string);
-  dbus_message_iter_next (&iter_struct);
-
-  dbus_message_iter_get_basic (&iter_struct, &is_text);
-  event->is_text = is_text;
-}
-
-DBusHandlerResult
-_atspi_dbus_handle_DeviceEvent (DBusConnection *bus, DBusMessage *message, void *data)
-{
-  const char *path = dbus_message_get_path (message);
-  int id;
-  AtspiDeviceEvent event;
-    AtspiDeviceListener *listener;
-  DBusMessageIter iter;
-  AtspiDeviceListenerClass *klass;
-  dbus_bool_t retval = FALSE;
-  GList *l;
-  DBusMessage *reply;
-
-  if (strcmp (dbus_message_get_signature (message), "(uiuuisb)") != 0)
-  {
-    g_warning ("Atspi: Unknown signature for an event");
-    goto done;
-  }
-
-  if (sscanf (path, "/org/a11y/atspi/listeners/%d", &id) != 1)
-  {
-    g_warning ("Atspi: Bad listener path: %s\n", path);
-    goto done;
-  }
-
-  for (l = device_listeners; l; l = g_list_next (l))
-  {
-    listener = l->data;
-    if (listener->id == id) break;
-  }
-
-  if (!l)
-  {
-    goto done;
-  }
-  dbus_message_iter_init (message, &iter);
-  read_device_event_from_iter (&iter, &event);
-  klass = ATSPI_DEVICE_LISTENER_GET_CLASS (listener);
-  if (klass->device_event)
-  {
-    retval = (*klass->device_event) (listener, &event);
-    if (retval != 0 && retval != 1)
-    {
-      g_warning ("at-spi: device event handler returned %d; should be 0 or 1", retval);
-      retval = 0;
-    }
-  }
-done:
-  reply = dbus_message_new_method_return (message);
-  if (reply)
-  {
-    dbus_message_append_args (reply, DBUS_TYPE_BOOLEAN, &retval, DBUS_TYPE_INVALID);
-    dbus_connection_send (_atspi_bus(), reply, NULL);
-    dbus_message_unref (reply);
-  }
-  return DBUS_HANDLER_RESULT_HANDLED;
 }
 
 gchar *

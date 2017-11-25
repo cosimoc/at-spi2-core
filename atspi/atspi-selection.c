@@ -24,6 +24,16 @@
 
 #include "atspi-private.h"
 
+#include "xml/a11y-atspi-selection.h"
+
+static A11yAtspiSelection *
+get_selection_proxy (AtspiSelection *selection)
+{
+  return atspi_accessible_get_iface_proxy
+    (ATSPI_ACCESSIBLE (selection), (AtspiAccessibleProxyInit) a11y_atspi_selection_proxy_new_sync,
+     "a11y-atspi-selection-proxy");
+}
+
 /**
  * atspi_selection_get_n_selected_children:
  * @obj: a pointer to the #AtspiSelection implementor on which to operate.
@@ -38,13 +48,9 @@
 gint
 atspi_selection_get_n_selected_children (AtspiSelection *obj, GError **error)
 {
-  dbus_int32_t retval = -1;
-
   g_return_val_if_fail (obj != NULL, -1);
 
-  _atspi_dbus_get_property (obj, atspi_interface_selection, "NSelectedChildren", error, "i", &retval);
-
-  return retval;
+  return a11y_atspi_selection_get_nselected_children (get_selection_proxy (obj));
 }
 
 /**
@@ -70,16 +76,20 @@ AtspiAccessible *
 atspi_selection_get_selected_child (AtspiSelection *obj,
                                       gint selected_child_index, GError **error)
 {
-  dbus_int32_t d_selected_child_index = selected_child_index;
-  DBusMessage *reply;
+  AtspiAccessible *accessible = NULL;
+  GVariant *variant = NULL;
 
   g_return_val_if_fail (obj != NULL, NULL);
-  
-  reply = _atspi_dbus_call_partial (obj, atspi_interface_selection,
-                                    "GetSelectedChild", error, "i",
-                                    d_selected_child_index);
 
-  return _atspi_dbus_return_accessible_from_message (reply);
+  if (a11y_atspi_selection_call_get_selected_child_sync (get_selection_proxy (obj),
+                                                         selected_child_index,
+                                                         &variant, NULL, error))
+    {
+      accessible = _atspi_dbus_return_accessible_from_variant (variant);
+      g_variant_unref (variant);
+    }
+
+  return accessible;
 }
 
 /**
@@ -100,13 +110,13 @@ atspi_selection_select_child (AtspiSelection *obj,
                               gint child_index,
                               GError **error)
 {
-  dbus_int32_t d_child_index = child_index;
-  dbus_bool_t retval = FALSE;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_selection, "SelectChild", error, "i=>b", d_child_index, &retval);
-
+  a11y_atspi_selection_call_select_child_sync (get_selection_proxy (obj),
+                                               child_index,
+                                               &retval, NULL, error);
   return retval;
 }
 
@@ -129,13 +139,13 @@ atspi_selection_deselect_selected_child (AtspiSelection *obj,
                                          gint selected_child_index,
                                          GError **error)
 {
-  dbus_int32_t d_selected_child_index = selected_child_index;
-  dbus_bool_t retval = FALSE;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_selection, "DeselectSelectedChild", error, "i=>b", d_selected_child_index, &retval);
-
+  a11y_atspi_selection_call_deselect_selected_child_sync (get_selection_proxy (obj),
+                                                          selected_child_index,
+                                                          &retval, NULL, error);
   return retval;
 }
 
@@ -158,13 +168,13 @@ atspi_selection_deselect_child (AtspiSelection *obj,
 				gint child_index,
 				GError **error)
 {
-  dbus_int32_t d_child_index = child_index;
-  dbus_bool_t retval = FALSE;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_selection, "DeselectChild", error, "i=>b", d_child_index, &retval);
-
+  a11y_atspi_selection_call_deselect_child_sync (get_selection_proxy (obj),
+                                                 child_index,
+                                                 &retval, NULL, error);
   return retval;
 }
 
@@ -185,13 +195,13 @@ atspi_selection_is_child_selected (AtspiSelection *obj,
                                    gint child_index,
                                    GError **error)
 {
-  dbus_int32_t d_child_index = child_index;
-  dbus_bool_t retval = FALSE;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_selection, "IsChildSelected", error, "i=>b", d_child_index, &retval);
-
+  a11y_atspi_selection_call_is_child_selected_sync (get_selection_proxy (obj),
+                                                    child_index,
+                                                    &retval, NULL, error);
   return retval;
 }
 
@@ -208,12 +218,12 @@ atspi_selection_is_child_selected (AtspiSelection *obj,
 gboolean
 atspi_selection_select_all (AtspiSelection *obj, GError **error)
 {
-  dbus_bool_t retval = FALSE;
-  
+  gboolean retval = FALSE;
+
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_selection, "SelectAll", error, "=>b", &retval);
-
+  a11y_atspi_selection_call_select_all_sync (get_selection_proxy (obj),
+                                             &retval, NULL, error);
   return retval;
 }
 
@@ -230,12 +240,12 @@ atspi_selection_select_all (AtspiSelection *obj, GError **error)
 gboolean
 atspi_selection_clear_selection (AtspiSelection *obj, GError **error)
 {
-  dbus_bool_t retval = FALSE;
-  
+  gboolean retval = FALSE;
+
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_selection, "ClearSelection", error, "=>b", &retval);
-
+  a11y_atspi_selection_call_clear_selection_sync (get_selection_proxy (obj),
+                                                  &retval, NULL, error);
   return retval;
 }
 

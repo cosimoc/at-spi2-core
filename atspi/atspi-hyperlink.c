@@ -24,16 +24,42 @@
 
 #include "atspi-private.h"
 
-G_DEFINE_TYPE (AtspiHyperlink, atspi_hyperlink, ATSPI_TYPE_OBJECT)
+#include "xml/a11y-atspi-hyperlink.h"
+
+typedef struct {
+  A11yAtspiHyperlink *hyperlink_proxy;
+} AtspiHyperlinkPrivate;
+
+G_DEFINE_TYPE_WITH_PRIVATE (AtspiHyperlink, atspi_hyperlink, ATSPI_TYPE_OBJECT)
 
 static void
 atspi_hyperlink_init (AtspiHyperlink *hyperlink)
 {
+  AtspiApplication *app = hyperlink->parent.app;
+  AtspiHyperlinkPrivate *priv = atspi_hyperlink_get_instance_private (hyperlink);
+  priv->hyperlink_proxy = a11y_atspi_hyperlink_proxy_new_sync (g_dbus_proxy_get_connection (G_DBUS_PROXY (atspi_application_get_application_proxy (app))),
+                                                               G_DBUS_PROXY_FLAGS_NONE,
+                                                               app->bus_name, hyperlink->parent.path,
+                                                               NULL, NULL);
+}
+
+static void
+atspi_hyperlink_finalize (GObject *object)
+{
+  AtspiHyperlink *hyperlink = ATSPI_HYPERLINK (object);
+  AtspiHyperlinkPrivate *priv = atspi_hyperlink_get_instance_private (hyperlink);
+
+  g_clear_object (&priv->hyperlink_proxy);
+
+  G_OBJECT_CLASS (atspi_hyperlink_parent_class)->finalize (object);
 }
 
 static void
 atspi_hyperlink_class_init (AtspiHyperlinkClass *klass)
 {
+  GObjectClass *oclass = G_OBJECT_CLASS (klass);
+
+  oclass->finalize = atspi_hyperlink_finalize;
 }
 
 AtspiHyperlink *
@@ -64,13 +90,12 @@ _atspi_hyperlink_new (AtspiApplication *app, const gchar *path)
 gint
 atspi_hyperlink_get_n_anchors (AtspiHyperlink *obj, GError **error)
 {
-  dbus_int32_t retval = -1;
+  AtspiHyperlinkPrivate *priv;
 
   g_return_val_if_fail (obj != NULL, -1);
+  priv = atspi_hyperlink_get_instance_private (obj);
 
-  _atspi_dbus_get_property (obj, atspi_interface_hyperlink, "NAnchors", error, "i", &retval);
-
-  return retval;
+  return a11y_atspi_hyperlink_get_nanchors (priv->hyperlink_proxy);
 }
 
 /**
@@ -85,13 +110,14 @@ atspi_hyperlink_get_n_anchors (AtspiHyperlink *obj, GError **error)
 gchar *
 atspi_hyperlink_get_uri (AtspiHyperlink *obj, int i, GError **error)
 {
-  dbus_int32_t d_i = i;
+  AtspiHyperlinkPrivate *priv;
   char *retval = NULL;
 
   g_return_val_if_fail (obj != NULL, NULL);
+  priv = atspi_hyperlink_get_instance_private (obj);
 
-  _atspi_dbus_call (obj, atspi_interface_hyperlink, "GetURI", error, "i=>s", d_i, &retval);
-
+  a11y_atspi_hyperlink_call_get_uri_sync (priv->hyperlink_proxy, i,
+                                          &retval, NULL, error);
   if (!retval)
     retval = g_strdup ("");
 
@@ -112,14 +138,21 @@ atspi_hyperlink_get_uri (AtspiHyperlink *obj, int i, GError **error)
 AtspiAccessible*
 atspi_hyperlink_get_object (AtspiHyperlink *obj, gint i, GError **error)
 {
-  dbus_int32_t d_i = i;
-  DBusMessage *reply;
+  AtspiHyperlinkPrivate *priv;
+  GVariant *variant;
+  AtspiAccessible *accessible = NULL;
 
   g_return_val_if_fail (obj != NULL, NULL);
+  priv = atspi_hyperlink_get_instance_private (obj);
 
-  reply = _atspi_dbus_call_partial (obj, atspi_interface_hyperlink, "GetObject", error, "i", d_i);
+  if (a11y_atspi_hyperlink_call_get_object_sync (priv->hyperlink_proxy, i,
+                                                 &variant, NULL, error))
+    {
+      accessible = _atspi_dbus_return_accessible_from_variant (variant);
+      g_variant_unref (variant);
+    }
 
-  return _atspi_dbus_return_accessible_from_message (reply);
+  return accessible;
 }
 
 /**
@@ -133,19 +166,18 @@ atspi_hyperlink_get_object (AtspiHyperlink *obj, gint i, GError **error)
 AtspiRange *
 atspi_hyperlink_get_index_range (AtspiHyperlink *obj, GError **error)
 {
-  dbus_int32_t d_start_offset = -1;
-  dbus_int32_t d_end_offset = -1;
-  AtspiRange *ret = g_new (AtspiRange, 1);
+  AtspiHyperlinkPrivate *priv;
+  AtspiRange *ret;
 
+  ret = g_new (AtspiRange, 1);
   ret->start_offset = ret->end_offset = -1;
 
-  if (!obj)
-    return ret;
+  g_return_val_if_fail (obj != NULL, ret);
+  priv = atspi_hyperlink_get_instance_private (obj);
 
-  _atspi_dbus_call (obj, atspi_interface_hyperlink, "GetIndexRange", error, "=>ii", &d_start_offset, &d_end_offset);
+  ret->start_offset = a11y_atspi_hyperlink_get_start_index (priv->hyperlink_proxy);
+  ret->end_offset = a11y_atspi_hyperlink_get_end_index (priv->hyperlink_proxy);
 
-  ret->start_offset = d_start_offset;
-  ret->end_offset = d_end_offset;
   return ret;
 }
 
@@ -160,15 +192,12 @@ atspi_hyperlink_get_index_range (AtspiHyperlink *obj, GError **error)
 gint
 atspi_hyperlink_get_start_index (AtspiHyperlink *obj, GError **error)
 {
-  dbus_int32_t d_start_offset = -1;
+  AtspiHyperlinkPrivate *priv;
 
-  if (!obj)
-    return -1;
+  g_return_val_if_fail (obj != NULL, -1);
+  priv = atspi_hyperlink_get_instance_private (obj);
 
-  _atspi_dbus_get_property (obj, atspi_interface_hyperlink, "StartIndex",
-                            error, "i", &d_start_offset);
-
-  return d_start_offset;
+  return a11y_atspi_hyperlink_get_start_index (priv->hyperlink_proxy);
 }
 /**
  * atspi_hyperlink_get_end_index:
@@ -181,15 +210,12 @@ atspi_hyperlink_get_start_index (AtspiHyperlink *obj, GError **error)
 gint
 atspi_hyperlink_get_end_index (AtspiHyperlink *obj, GError **error)
 {
-  dbus_int32_t d_end_offset = -1;
+  AtspiHyperlinkPrivate *priv;
 
-  if (!obj)
-    return -1;
+  g_return_val_if_fail (obj != NULL, -1);
+  priv = atspi_hyperlink_get_instance_private (obj);
 
-  _atspi_dbus_get_property (obj, atspi_interface_hyperlink, "EndIndex", error,
-                            "i", &d_end_offset);
-
-  return d_end_offset;
+  return a11y_atspi_hyperlink_get_start_index (priv->hyperlink_proxy);
 }
 
 
@@ -206,11 +232,13 @@ atspi_hyperlink_get_end_index (AtspiHyperlink *obj, GError **error)
 gboolean
 atspi_hyperlink_is_valid (AtspiHyperlink *obj, GError **error)
 {
-  dbus_bool_t retval = FALSE;
+  AtspiHyperlinkPrivate *priv;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
+  priv = atspi_hyperlink_get_instance_private (obj);
 
-  _atspi_dbus_call (obj, atspi_interface_hyperlink, "IsValid", error, "=>b", &retval);
-
+  a11y_atspi_hyperlink_call_is_valid_sync (priv->hyperlink_proxy,
+                                           &retval, NULL, error);
   return retval;
 }

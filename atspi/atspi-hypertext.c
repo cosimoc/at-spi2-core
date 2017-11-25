@@ -24,6 +24,16 @@
 
 #include "atspi-private.h"
 
+#include "xml/a11y-atspi-hypertext.h"
+
+static A11yAtspiHypertext *
+get_hypertext_proxy (AtspiHypertext *hypertext)
+{
+  return atspi_accessible_get_iface_proxy
+    (ATSPI_ACCESSIBLE (hypertext), (AtspiAccessibleProxyInit) a11y_atspi_hypertext_proxy_new_sync,
+     "a11y-atspi-hypertext-proxy");
+}
+
 /**
  * atspi_hypertext_get_n_links:
  * @obj: a pointer to the #AtspiHypertext implementor on which to operate.
@@ -40,12 +50,12 @@
 gint
 atspi_hypertext_get_n_links (AtspiHypertext *obj, GError **error)
 {
-  dbus_int32_t retval = 0;
+  gint retval = 0;
 
-  g_return_val_if_fail (obj != NULL, FALSE);
+  g_return_val_if_fail (obj != NULL, 0);
 
-  _atspi_dbus_call (obj, atspi_interface_hypertext, "GetNLinks", error, "=>i", &retval);
-
+  a11y_atspi_hypertext_call_get_nlinks_sync (get_hypertext_proxy (obj),
+                                             &retval, NULL, error);
   return retval;
 }
 
@@ -62,14 +72,20 @@ atspi_hypertext_get_n_links (AtspiHypertext *obj, GError **error)
 AtspiHyperlink *
 atspi_hypertext_get_link (AtspiHypertext *obj, gint link_index, GError **error)
 {
-  dbus_int32_t d_link_index = link_index;
-  DBusMessage *reply;
+  GVariant *variant = NULL;
+  AtspiHyperlink *hyperlink = NULL;
 	
   g_return_val_if_fail (obj != NULL, NULL);
 
-  reply = _atspi_dbus_call_partial (obj, atspi_interface_hypertext, "GetLink", error, "i", d_link_index);
+  if (a11y_atspi_hypertext_call_get_link_sync (get_hypertext_proxy (obj),
+                                               link_index,
+                                               &variant, NULL, error))
+    {
+      hyperlink = _atspi_dbus_return_hyperlink_from_variant (variant);
+      g_variant_unref (variant);
+    }
 
-  return _atspi_dbus_return_hyperlink_from_message (reply);
+  return hyperlink;
 }
 
 /**
@@ -89,13 +105,13 @@ atspi_hypertext_get_link_index (AtspiHypertext *obj,
                                 gint             character_offset,
                                 GError **error)
 {
-  dbus_int32_t d_character_offset = character_offset;
-  dbus_int32_t retval = -1;
+  gint retval = -1;
 
-  g_return_val_if_fail (obj != NULL, -1);
+  g_return_val_if_fail (obj != NULL, 0);
 
-  _atspi_dbus_call (obj, atspi_interface_hypertext, "GetLinkIndex", error, "i=>i", d_character_offset, &retval);
-
+  a11y_atspi_hypertext_call_get_link_index_sync (get_hypertext_proxy (obj),
+                                                 character_offset,
+                                                 &retval, NULL, error);
   return retval;
 }
 

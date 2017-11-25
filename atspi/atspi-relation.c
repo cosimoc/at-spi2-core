@@ -80,29 +80,29 @@ atspi_relation_get_target (AtspiRelation *obj, gint i)
 }
 
 AtspiRelation *
-_atspi_relation_new_from_iter (DBusMessageIter *iter)
+_atspi_relation_new_from_variant (GVariant *variant)
 {
-  DBusMessageIter iter_struct, iter_array;
-  dbus_uint32_t d_type;
+  GVariantIter iter, array_iter;
+  GVariant *value, *node;
   AtspiRelation *relation = g_object_new (ATSPI_TYPE_RELATION, NULL);
 
-  if (!relation)
-    return NULL;
+  g_variant_iter_init (&iter, variant);
+  value = g_variant_iter_next_value (&iter);
 
-  dbus_message_iter_recurse (iter, &iter_struct);
-  dbus_message_iter_get_basic (&iter_struct, &d_type);
-  relation->relation_type = d_type;
-  dbus_message_iter_next (&iter_struct);
+  relation->relation_type = g_variant_get_uint32 (value);
+
+  g_variant_unref (value);
+  value = g_variant_iter_next_value (&iter);
 
   relation->targets = g_array_new (TRUE, TRUE, sizeof (AtspiAccessible *));
-  dbus_message_iter_recurse (&iter_struct, &iter_array);
-  while (dbus_message_iter_get_arg_type (&iter_array) != DBUS_TYPE_INVALID)
-  {
-    AtspiAccessible *accessible;
-    accessible = _atspi_dbus_return_accessible_from_iter (&iter_array);
-    relation->targets = g_array_append_val (relation->targets, accessible);
-    /* Iter was moved already, so no need to call dbus_message_iter_next */
-  }
+  g_variant_iter_init (&array_iter, value);
+  while ((node = g_variant_iter_next_value (&array_iter)))
+    {
+      AtspiAccessible *accessible = _atspi_dbus_return_accessible_from_variant (node);
+      relation->targets = g_array_append_val (relation->targets, accessible);
+      g_variant_unref (node);
+    }
+
   return relation;
 }
 

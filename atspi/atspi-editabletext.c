@@ -23,6 +23,16 @@
 
 #include "atspi-private.h"
 
+#include "xml/a11y-atspi-editable-text.h"
+
+static A11yAtspiEditableText *
+get_editable_text_proxy (AtspiEditableText *editable_text)
+{
+  return atspi_accessible_get_iface_proxy
+    (ATSPI_ACCESSIBLE (editable_text), (AtspiAccessibleProxyInit) a11y_atspi_editable_text_proxy_new_sync,
+     "a11y-atspi-editable-text-proxy");
+}
+
 /**
  * atspi_editable_text_set_text_contents:
  * @obj: a pointer to the #AtspiEditableText object to modify.
@@ -38,12 +48,13 @@ atspi_editable_text_set_text_contents (AtspiEditableText *obj,
                                        const gchar *new_contents,
                                        GError **error)
 {
-  dbus_bool_t retval = FALSE;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_editable_text, "SetTextContents", error, "s=>b", new_contents, &retval);
-
+  a11y_atspi_editable_text_call_set_text_contents_sync (get_editable_text_proxy (obj),
+                                                        new_contents,
+                                                        &retval, NULL, error);
   return retval;
 }
 
@@ -71,13 +82,13 @@ atspi_editable_text_insert_text (AtspiEditableText *obj,
                                  gint length,
                                  GError **error)
 {
-  dbus_int32_t d_position = position, d_length = length;
-  dbus_bool_t retval = FALSE;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_editable_text, "InsertText", error, "isi=>b", d_position, text, d_length, &retval);
-
+  a11y_atspi_editable_text_call_insert_text_sync (get_editable_text_proxy (obj),
+                                                  position, text, length,
+                                                  &retval, NULL, error);
   return retval;
 }
 
@@ -101,12 +112,11 @@ atspi_editable_text_copy_text (AtspiEditableText *obj,
                                gint end_pos,
                                GError **error)
 {
-  dbus_int32_t d_start_pos = start_pos, d_end_pos = end_pos;
-
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_editable_text, "CopyText", error, "ii", d_start_pos, d_end_pos);
-
+  a11y_atspi_editable_text_call_copy_text_sync (get_editable_text_proxy (obj),
+                                                start_pos, end_pos,
+                                                NULL, error);
   return TRUE;
 }
 
@@ -131,13 +141,13 @@ atspi_editable_text_cut_text (AtspiEditableText *obj,
                               gint end_pos,
                               GError **error)
 {
-  dbus_int32_t d_start_pos = start_pos, d_end_pos = end_pos;
-  dbus_bool_t retval = FALSE;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_editable_text, "CutText", error, "ii=>b", d_start_pos, d_end_pos, &retval);
-
+  a11y_atspi_editable_text_call_cut_text_sync (get_editable_text_proxy (obj),
+                                               start_pos, end_pos,
+                                               &retval, NULL, error);
   return retval;
 }
 
@@ -162,13 +172,13 @@ atspi_editable_text_delete_text (AtspiEditableText *obj,
                                  gint end_pos,
                                  GError **error)
 {
-  dbus_int32_t d_start_pos = start_pos, d_end_pos = end_pos;
-  dbus_bool_t retval = FALSE;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_editable_text, "DeleteText", error, "ii=>b", d_start_pos, d_end_pos, &retval);
-
+  a11y_atspi_editable_text_call_delete_text_sync (get_editable_text_proxy (obj),
+                                                  start_pos, end_pos,
+                                                  &retval, NULL, error);
   return retval;
 }
 
@@ -190,13 +200,13 @@ atspi_editable_text_paste_text (AtspiEditableText *obj,
                                 gint position,
                                 GError **error)
 {
-  dbus_int32_t d_position = position;
-  dbus_bool_t retval = FALSE;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_editable_text, "PasteText", error, "i=>b", d_position, &retval);
-
+  a11y_atspi_editable_text_call_paste_text_sync (get_editable_text_proxy (obj),
+                                                 position,
+                                                 &retval, NULL, error);
   return retval;
 }
 

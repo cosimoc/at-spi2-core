@@ -24,6 +24,16 @@
 
 #include "atspi-private.h"
 
+#include "xml/a11y-atspi-value.h"
+
+static A11yAtspiValue *
+get_value_proxy (AtspiValue *value)
+{
+  return atspi_accessible_get_iface_proxy
+    (ATSPI_ACCESSIBLE (value), (AtspiAccessibleProxyInit) a11y_atspi_value_proxy_new_sync,
+     "a11y-atspi-value-proxy");
+}
+
 /**
  * atspi_value_get_minimum_value:
  * @obj: a pointer to the #AtspiValue implementor on which to operate. 
@@ -36,12 +46,9 @@
 gdouble
 atspi_value_get_minimum_value (AtspiValue *obj, GError **error)
 {
-  double retval;
-
   g_return_val_if_fail (obj != NULL, 0.0);
-  _atspi_dbus_get_property (obj, atspi_interface_value, "MinimumValue", error, "d", &retval);
-  
-  return retval;
+
+  return a11y_atspi_value_get_minimum_value (get_value_proxy (obj));
 }
 
 /**
@@ -55,13 +62,9 @@ atspi_value_get_minimum_value (AtspiValue *obj, GError **error)
 gdouble
 atspi_value_get_current_value (AtspiValue *obj, GError **error)
 {
-  double retval;
-
   g_return_val_if_fail (obj != NULL, 0.0);
 
-  _atspi_dbus_get_property (obj, atspi_interface_value, "CurrentValue", error, "d", &retval);
-
-  return retval;
+  return a11y_atspi_value_get_current_value (get_value_proxy (obj));
 }
 
 /**
@@ -75,13 +78,9 @@ atspi_value_get_current_value (AtspiValue *obj, GError **error)
 gdouble
 atspi_value_get_maximum_value (AtspiValue *obj, GError **error)
 {
-  double retval;	
-
   g_return_val_if_fail (obj != NULL, 0.0);
 
-  _atspi_dbus_get_property (obj, atspi_interface_value, "MaximumValue", error, "d", &retval);
-
-  return retval;
+  return a11y_atspi_value_get_maximum_value (get_value_proxy (obj));
 }
 
 /**
@@ -97,36 +96,9 @@ atspi_value_get_maximum_value (AtspiValue *obj, GError **error)
 gboolean
 atspi_value_set_current_value (AtspiValue *obj, gdouble new_value, GError **error)
 {
-  double d_new_value = new_value;
-  DBusMessage *message, *reply;
-  DBusMessageIter iter, iter_variant;
-  static const char *str_curval = "CurrentValue";
-  AtspiAccessible *accessible = ATSPI_ACCESSIBLE (obj);
+  g_return_val_if_fail (obj != NULL, FALSE);
 
-  g_return_val_if_fail (accessible != NULL, FALSE);
-
-  if (!accessible->parent.app || !accessible->parent.app->bus_name)
-{
-    g_set_error_literal (error, ATSPI_ERROR, ATSPI_ERROR_APPLICATION_GONE,
-                          _("The application no longer exists"));
-    return FALSE;
-  }
-
-    message = dbus_message_new_method_call (accessible->parent.app->bus_name,
-                                            accessible->parent.path,
-                                            DBUS_INTERFACE_PROPERTIES, "Set");
-    if (!message)
-      return FALSE;
-    dbus_message_append_args (message, DBUS_TYPE_STRING, &atspi_interface_value,
-                               DBUS_TYPE_STRING, &str_curval,
-                              DBUS_TYPE_INVALID);
-  dbus_message_iter_init_append (message, &iter);
-  dbus_message_iter_open_container (&iter, DBUS_TYPE_VARIANT, "d", &iter_variant);
-  dbus_message_iter_append_basic (&iter_variant, DBUS_TYPE_DOUBLE, &d_new_value);
-  dbus_message_iter_close_container (&iter, &iter_variant);
-    reply = _atspi_dbus_send_with_reply_and_block (message, error);
-  dbus_message_unref (reply);
-
+  a11y_atspi_value_set_current_value (get_value_proxy (obj), new_value);
   return TRUE;
 }
 
@@ -143,13 +115,9 @@ atspi_value_set_current_value (AtspiValue *obj, gdouble new_value, GError **erro
 gdouble
 atspi_value_get_minimum_increment (AtspiValue *obj, GError **error)
 {
-  double retval;
-
   g_return_val_if_fail (obj != NULL, 0.0);
 
-  _atspi_dbus_get_property (obj, atspi_interface_value, "MinimumIncrement", error, "d", &retval);
-  
-  return retval;
+  return a11y_atspi_value_get_minimum_increment (get_value_proxy (obj));
 }
 
 static void

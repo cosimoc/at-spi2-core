@@ -60,7 +60,7 @@ gint atspi_relation_get_n_targets (AtspiRelation *obj);
 AtspiAccessible * atspi_relation_get_target (AtspiRelation *obj, gint i);
 
 /* private */
-AtspiRelation * _atspi_relation_new_from_iter (DBusMessageIter *iter);
+AtspiRelation * _atspi_relation_new_from_variant (GVariant *variant);
 
 G_END_DECLS
 

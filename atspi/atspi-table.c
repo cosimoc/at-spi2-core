@@ -25,6 +25,16 @@
 #include <stdlib.h> /* for malloc */
 #include "atspi-private.h"
 
+#include "xml/a11y-atspi-table.h"
+
+static A11yAtspiTable *
+get_table_proxy (AtspiTable *table)
+{
+  return atspi_accessible_get_iface_proxy
+    (ATSPI_ACCESSIBLE (table), (AtspiAccessibleProxyInit) a11y_atspi_table_proxy_new_sync,
+     "a11y-atspi-table-proxy");
+}
+
 /**
  * atspi_table_get_caption:
  * @obj: a pointer to the #AtspiTable implementor on which to operate.
@@ -39,10 +49,14 @@ AtspiAccessible *
 atspi_table_get_caption (AtspiTable *obj, GError **error)
 {
   AtspiAccessible *retval = NULL;
+  GVariant *variant;
 
   g_return_val_if_fail (obj != NULL, NULL);
 
-  _atspi_dbus_get_property (obj, atspi_interface_table, "Caption", error, "(so)", &retval);
+  variant = a11y_atspi_table_get_caption (get_table_proxy (obj));
+  if (variant)
+    retval = _atspi_dbus_return_accessible_from_variant (variant);
+
   return retval;
 }
 
@@ -58,13 +72,16 @@ atspi_table_get_caption (AtspiTable *obj, GError **error)
 AtspiAccessible *
 atspi_table_get_summary (AtspiTable *obj, GError **error)
 {
-  AtspiAccessible *retval;
+  AtspiAccessible *retval = NULL;
+  GVariant *variant;
 
   g_return_val_if_fail (obj != NULL, NULL);
 
-  _atspi_dbus_get_property (obj, atspi_interface_table, "Summary", error, "(so)", &retval);
+  variant = a11y_atspi_table_get_summary (get_table_proxy (obj));
+  if (variant)
+    retval = _atspi_dbus_return_accessible_from_variant (variant);
 
- return retval;
+  return retval;
 }
 
 /**
@@ -80,13 +97,9 @@ atspi_table_get_summary (AtspiTable *obj, GError **error)
 gint
 atspi_table_get_n_rows (AtspiTable *obj, GError **error)
 {
-  dbus_int32_t retval = -1;
-
   g_return_val_if_fail (obj != NULL, -1);
 
-  _atspi_dbus_get_property (obj, atspi_interface_table, "NRows", error, "i", &retval);
-	  
-  return retval;
+  return a11y_atspi_table_get_nrows (get_table_proxy (obj));
 }
 
 /**
@@ -102,13 +115,9 @@ atspi_table_get_n_rows (AtspiTable *obj, GError **error)
 gint
 atspi_table_get_n_columns (AtspiTable *obj, GError **error)
 {
-  dbus_int32_t retval = -1;
-
   g_return_val_if_fail (obj != NULL, -1);
 
-  _atspi_dbus_get_property (obj, atspi_interface_table, "NColumns", error, "i", &retval);
-	  
-  return retval;
+  return a11y_atspi_table_get_ncolumns (get_table_proxy (obj));
 }
 
 /**
@@ -130,14 +139,20 @@ atspi_table_get_accessible_at (AtspiTable *obj,
                                  gint column,
                                  GError **error)
 {
-  dbus_int32_t d_row = row, d_column = column;
-  DBusMessage *reply;
+  AtspiAccessible *accessible = NULL;
+  GVariant *variant = NULL;
 
   g_return_val_if_fail (obj != NULL, NULL);
 
-  reply = _atspi_dbus_call_partial (obj, atspi_interface_table, "GetAccessibleAt", error, "ii", d_row, d_column);
+  if (a11y_atspi_table_call_get_accessible_at_sync (get_table_proxy (obj),
+                                                    row, column,
+                                                    &variant, NULL, error))
+    {
+      accessible = _atspi_dbus_return_accessible_from_variant (variant);
+      g_variant_unref (variant);
+    }
 
-  return _atspi_dbus_return_accessible_from_message (reply);
+  return accessible;
 }
 
 /**
@@ -161,13 +176,13 @@ atspi_table_get_index_at (AtspiTable *obj,
                             gint column,
                             GError **error)
 {
-  dbus_int32_t d_row = row, d_column = column;
-  dbus_int32_t retval = -1;
+  gint retval = -1;
 
   g_return_val_if_fail (obj != NULL, -1);
 
-  _atspi_dbus_call (obj, atspi_interface_table, "GetIndexAt", error, "ii=>i", d_row, d_column, &retval);
-	  
+  a11y_atspi_table_call_get_index_at_sync (get_table_proxy (obj),
+                                           row, column,
+                                           &retval, NULL, error);
   return retval;
 }
 
@@ -189,13 +204,13 @@ atspi_table_get_row_at_index (AtspiTable *obj,
                                gint index,
                                GError **error)
 {
-  dbus_int32_t d_index = index;
-  dbus_int32_t retval = -1;
+  gint retval = -1;
 
   g_return_val_if_fail (obj != NULL, -1);
 
-  _atspi_dbus_call (obj, atspi_interface_table, "GetRowAtIndex", error, "i=>i", d_index, &retval);
-	  
+  a11y_atspi_table_call_get_row_at_index_sync (get_table_proxy (obj),
+                                               index,
+                                               &retval, NULL, error);
   return retval;
 }
 
@@ -217,13 +232,13 @@ atspi_table_get_column_at_index (AtspiTable *obj,
                                   gint index,
                                   GError **error)
 {
-  dbus_int32_t d_index = index;
-  dbus_int32_t retval = -1;
+  gint retval = -1;
 
   g_return_val_if_fail (obj != NULL, -1);
 
-  _atspi_dbus_call (obj, atspi_interface_table, "GetColumnAtIndex", error, "i=>i", d_index, &retval);
-	  
+  a11y_atspi_table_call_get_column_at_index_sync (get_table_proxy (obj),
+                                                  index,
+                                                  &retval, NULL, error);
   return retval;
 }
 
@@ -242,13 +257,13 @@ atspi_table_get_row_description (AtspiTable *obj,
 				   gint  row,
 				   GError **error)
 {
-  dbus_int32_t d_row = row;
   char *retval = NULL;
 
   g_return_val_if_fail (obj != NULL, NULL);
 
-  _atspi_dbus_call (obj, atspi_interface_table, "GetRowDescription", error, "i=>s", d_row, &retval);
-	  
+  a11y_atspi_table_call_get_row_description_sync (get_table_proxy (obj),
+                                                  row,
+                                                  &retval, NULL, error);
   return retval;
 }
 
@@ -266,13 +281,13 @@ gchar *
 atspi_table_get_column_description (AtspiTable *obj,
 				      gint         column, GError **error)
 {
-  dbus_int32_t d_column = column;
   char *retval = NULL;
 
   g_return_val_if_fail (obj != NULL, NULL);
 
-  _atspi_dbus_call (obj, atspi_interface_table, "GetColumnDescription", error, "i=>s", d_column, &retval);
-
+  a11y_atspi_table_call_get_row_description_sync (get_table_proxy (obj),
+                                                  column,
+                                                  &retval, NULL, error);
   return retval;
 }
 
@@ -294,13 +309,13 @@ atspi_table_get_row_extent_at (AtspiTable *obj,
                                 gint         column,
                                 GError **error)
 {
-  dbus_int32_t d_row = row, d_column = column;
-  dbus_int32_t retval = -1;
+  gint retval = -1;
 
   g_return_val_if_fail (obj != NULL, -1);
 
-  _atspi_dbus_call (obj, atspi_interface_table, "GetRowExtentAt", error, "ii=>i", d_row, d_column, &retval);
-	  
+  a11y_atspi_table_call_get_row_extent_at_sync (get_table_proxy (obj),
+                                                row, column,
+                                                &retval, NULL, error);
   return retval;
 }
 
@@ -322,13 +337,13 @@ atspi_table_get_column_extent_at (AtspiTable *obj,
                                    gint         column,
                                    GError **error)
 {
-  dbus_int32_t d_row = row, d_column = column;
-  dbus_int32_t retval = -1;
+  gint retval = -1;
 
   g_return_val_if_fail (obj != NULL, -1);
 
-  _atspi_dbus_call (obj, atspi_interface_table, "GetColumnExtentAt", error, "ii=>i", d_row, d_column, &retval);
-	  
+  a11y_atspi_table_call_get_column_extent_at_sync (get_table_proxy (obj),
+                                                   row, column,
+                                                   &retval, NULL, error);
   return retval;
 }
 
@@ -348,14 +363,20 @@ atspi_table_get_row_header (AtspiTable *obj,
 			      gint         row,
 			      GError **error)
 {
-  dbus_int32_t d_row = row;
-  DBusMessage *reply;
+  AtspiAccessible *accessible = NULL;
+  GVariant *variant = NULL;
 
   g_return_val_if_fail (obj != NULL, NULL);
 
-  reply = _atspi_dbus_call_partial (obj, atspi_interface_table, "GetRowHeader", error, "i", d_row);
+  if (a11y_atspi_table_call_get_row_header_sync (get_table_proxy (obj),
+                                                 row,
+                                                 &variant, NULL, error))
+    {
+      accessible = _atspi_dbus_return_accessible_from_variant (variant);
+      g_variant_unref (variant);
+    }
 
-  return _atspi_dbus_return_accessible_from_message (reply);
+  return accessible;
 }
 
 /**
@@ -375,14 +396,20 @@ atspi_table_get_column_header (AtspiTable *obj,
 				 gint column,
 				 GError **error)
 {
-  dbus_int32_t d_column = column;
-  DBusMessage *reply;
+  AtspiAccessible *accessible = NULL;
+  GVariant *variant = NULL;
 
   g_return_val_if_fail (obj != NULL, NULL);
 
-  reply = _atspi_dbus_call_partial (obj, atspi_interface_table, "GetColumnHeader", error, "i", d_column);
+  if (a11y_atspi_table_call_get_column_header_sync (get_table_proxy (obj),
+                                                    column,
+                                                    &variant, NULL, error))
+    {
+      accessible = _atspi_dbus_return_accessible_from_variant (variant);
+      g_variant_unref (variant);
+    }
 
-  return _atspi_dbus_return_accessible_from_message (reply);
+  return accessible;
 }
 
 /**
@@ -397,13 +424,9 @@ atspi_table_get_column_header (AtspiTable *obj,
 gint
 atspi_table_get_n_selected_rows (AtspiTable *obj, GError **error)
 {
-  dbus_int32_t retval = -1;
-
   g_return_val_if_fail (obj != NULL, -1);
 
-  _atspi_dbus_get_property (obj, atspi_interface_table, "NSelectedRows", error, "i", &retval);
-	  
-  return retval;
+  return a11y_atspi_table_get_nselected_rows (get_table_proxy (obj));
 }
 
 /**
@@ -419,11 +442,21 @@ GArray *
 atspi_table_get_selected_rows (AtspiTable *obj,
                                  GError **error)
 {
+  GVariant *variant = NULL;
   GArray *rows = NULL;
 
-  g_return_val_if_fail (obj != NULL, 0);
+  g_return_val_if_fail (obj != NULL, NULL);
 
-  _atspi_dbus_call (obj, atspi_interface_table, "GetSelectedRows", error, "=>ai", &rows);
+  if (a11y_atspi_table_call_get_selected_rows_sync (get_table_proxy (obj),
+                                                    &variant, NULL, error))
+    {
+      gsize length;
+      const gint32 *array = g_variant_get_fixed_array (variant, &length, sizeof (gint32));
+
+      rows = g_array_new (TRUE, TRUE, sizeof (gint32));
+      g_array_append_vals (rows, array, length);
+      g_variant_unref (variant);
+    }
 
   return rows;
 }
@@ -443,10 +476,20 @@ atspi_table_get_selected_columns (AtspiTable *obj,
                                  GError **error)
 {
   GArray *columns = NULL;
+  GVariant *variant = NULL;
 
-  g_return_val_if_fail (obj != NULL, 0);
+  g_return_val_if_fail (obj != NULL, NULL);
 
-  _atspi_dbus_call (obj, atspi_interface_table, "GetSelectedColumns", error, "=>ai", &columns);
+  if (a11y_atspi_table_call_get_selected_columns_sync (get_table_proxy (obj),
+                                                       &variant, NULL, error))
+    {
+      gsize length;
+      const gint32 *array = g_variant_get_fixed_array (variant, &length, sizeof (gint32));
+
+      columns = g_array_new (TRUE, TRUE, sizeof (gint32));
+      g_array_append_vals (columns, array, length);
+      g_variant_unref (variant);
+    }
 
   return columns;
 }
@@ -463,13 +506,9 @@ atspi_table_get_selected_columns (AtspiTable *obj,
 gint
 atspi_table_get_n_selected_columns (AtspiTable *obj, GError **error)
 {
-  dbus_int32_t retval = -1;
-
   g_return_val_if_fail (obj != NULL, -1);
 
-  _atspi_dbus_get_property (obj, atspi_interface_table, "NSelectedColumns", error, "i", &retval);
-	  
-  return retval;
+  return a11y_atspi_table_get_nselected_columns (get_table_proxy (obj));
 }
 
 /**
@@ -487,13 +526,13 @@ atspi_table_is_row_selected (AtspiTable *obj,
                                gint row,
                                GError **error)
 {
-  dbus_int32_t d_row = row;
-  dbus_bool_t retval = FALSE;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_table, "IsRowSelected", error, "i=>b", d_row, &retval);
-
+  a11y_atspi_table_call_is_row_selected_sync (get_table_proxy (obj),
+                                              row,
+                                              &retval, NULL, error);
   return retval;
 }
 
@@ -512,13 +551,13 @@ atspi_table_is_column_selected (AtspiTable *obj,
                                   gint column,
                                   GError **error)
 {
-  dbus_int32_t d_column = column;
-  dbus_bool_t retval = FALSE;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_table, "IsColumnSelected", error, "i=>b", d_column, &retval);
-	  
+  a11y_atspi_table_call_is_column_selected_sync (get_table_proxy (obj),
+                                                 column,
+                                                 &retval, NULL, error);
   return retval;
 }
 
@@ -537,13 +576,13 @@ atspi_table_add_row_selection (AtspiTable *obj,
 				 gint row,
 				 GError **error)
 {
-  dbus_int32_t d_row = row;
-  dbus_bool_t retval = FALSE;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_table, "AddRowSelection", error, "i=>b", d_row, &retval);
-	  
+  a11y_atspi_table_call_add_row_selection_sync (get_table_proxy (obj),
+                                                row,
+                                                &retval, NULL, error);
   return retval;
 }
 
@@ -562,13 +601,13 @@ atspi_table_add_column_selection (AtspiTable *obj,
 				    gint column,
 				    GError **error)
 {
-  dbus_int32_t d_column = column;
-  dbus_bool_t retval = FALSE;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_table, "AddColumnSelection", error, "i=>b", d_column, &retval);
-	  
+  a11y_atspi_table_call_add_column_selection_sync (get_table_proxy (obj),
+                                                   column,
+                                                   &retval, NULL, error);
   return retval;
 }
 
@@ -588,13 +627,13 @@ atspi_table_remove_row_selection (AtspiTable *obj,
 				    gint row,
 				    GError **error)
 {
-  dbus_int32_t d_row = row;
-  dbus_bool_t retval = FALSE;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_table, "RemoveRowSelection", error, "i=>b", d_row, &retval);
-	  
+  a11y_atspi_table_call_remove_row_selection_sync (get_table_proxy (obj),
+                                                   row,
+                                                   &retval, NULL, error);
   return retval;
 }
 
@@ -615,13 +654,13 @@ atspi_table_remove_column_selection (AtspiTable *obj,
 				       gint column,
 				       GError **error)
 {
-  dbus_int32_t d_column = column;
-  dbus_bool_t retval = FALSE;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_table, "RemoveColumnSelection", error, "i=>b", d_column, &retval);
-	  
+  a11y_atspi_table_call_remove_column_selection_sync (get_table_proxy (obj),
+                                                      column,
+                                                      &retval, NULL, error);
   return retval;
 }
 
@@ -673,23 +712,15 @@ atspi_table_get_row_column_extents_at_index (AtspiTable *obj,
 					    gint *row_extents, gint *col_extents, 
 					    gboolean *is_selected, GError **error)
 {
-  dbus_int32_t d_index = index;
-  dbus_bool_t retval = FALSE;
-  dbus_int32_t d_row = 0,  d_col = 0, d_row_extents = 0, d_col_extents = 0;
-  dbus_bool_t d_is_selected = FALSE;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_table, "GetRowColumnExtentsAtIndex",
-                    error, "i=>biiiib", d_index, &retval, &d_row, &d_col,
-                    &d_row_extents, &d_col_extents, &d_is_selected);
-
-  *row = d_row;
-  *col = d_col;
-  *row_extents = d_row_extents;;
-  *col_extents = d_col_extents;
-  *is_selected = d_is_selected;;
-  
+  a11y_atspi_table_call_get_row_column_extents_at_index_sync (get_table_proxy (obj),
+                                                              index,
+                                                              &retval, row, col,
+                                                              row_extents, col_extents, is_selected,
+                                                              NULL, error);
   return retval;
 }
 
@@ -710,13 +741,13 @@ atspi_table_is_selected (AtspiTable *obj,
                             gint column,
                             GError **error)
 {
-  dbus_int32_t d_row = row, d_column = column;
-  dbus_bool_t retval = FALSE;
+  gboolean retval = FALSE;
 
   g_return_val_if_fail (obj != NULL, FALSE);
 
-  _atspi_dbus_call (obj, atspi_interface_table, "IsSelected", error, "ii=>b", d_row, d_column, &retval);
-	  
+  a11y_atspi_table_call_is_selected_sync (get_table_proxy (obj),
+                                          row, column,
+                                          &retval, NULL, error);
   return retval;
 }
 

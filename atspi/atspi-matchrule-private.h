@@ -33,8 +33,8 @@
 
 G_BEGIN_DECLS
 
-gboolean
-_atspi_match_rule_marshal (AtspiMatchRule *rule, DBusMessageIter *iter);
+GVariant *
+_atspi_match_rule_to_variant (AtspiMatchRule *rule);
 
 G_END_DECLS
 

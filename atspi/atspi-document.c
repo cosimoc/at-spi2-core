@@ -23,6 +23,16 @@
 
 #include "atspi-private.h"
 
+#include "xml/a11y-atspi-document.h"
+
+static A11yAtspiDocument *
+get_document_proxy (AtspiDocument *document)
+{
+  return atspi_accessible_get_iface_proxy
+    (ATSPI_ACCESSIBLE (document), (AtspiAccessibleProxyInit) a11y_atspi_document_proxy_new_sync,
+     "a11y-atspi-document-proxy");
+}
+
 /**
  * atspi_document_get_locale:
  * @obj: a pointer to the #AtspiDocument object on which to operate.
@@ -39,8 +49,8 @@ atspi_document_get_locale (AtspiDocument *obj, GError **error)
 
   g_return_val_if_fail (obj != NULL, g_strdup ("C"));
 
-  _atspi_dbus_call (obj, atspi_interface_document, "GetLocale", error, "=>s", &retval);
-
+  a11y_atspi_document_call_get_locale_sync (get_document_proxy (obj), &retval,
+                                            NULL, error);
   return retval;
 }
 
@@ -83,9 +93,9 @@ atspi_document_get_document_attribute_value (AtspiDocument *obj,
 
   g_return_val_if_fail (obj != NULL, NULL);
 
-  _atspi_dbus_call (obj, atspi_interface_document, "GetAttributeValue", error, "s=>s", attribute, &retval);
-
-  if (!retval)
+  if (!a11y_atspi_document_call_get_attribute_value_sync (get_document_proxy (obj),
+                                                          attribute, &retval,
+                                                          NULL, error))
     retval = g_strdup ("");
 
   return retval;
@@ -123,12 +133,19 @@ atspi_document_get_attributes (AtspiDocument *obj, GError **error)
 GHashTable *
 atspi_document_get_document_attributes (AtspiDocument *obj, GError **error)
 {
-  DBusMessage *message;
+  GHashTable *ret = NULL;
+  GVariant *variant;
 
-    g_return_val_if_fail (obj != NULL, NULL);
+  g_return_val_if_fail (obj != NULL, NULL);
 
-  message = _atspi_dbus_call_partial (obj, atspi_interface_document, "GetAttributes", error, "");
-  return _atspi_dbus_return_hash_from_message (message);
+  if (a11y_atspi_document_call_get_attributes_sync (get_document_proxy (obj),
+                                                    &variant, NULL, error))
+    {
+      ret = _atspi_dbus_return_hash_from_variant (variant);
+      g_variant_unref (variant);
+    }
+
+  return ret;
 }
 
 /**
@@ -143,13 +160,9 @@ atspi_document_get_document_attributes (AtspiDocument *obj, GError **error)
 gint
 atspi_document_get_page_count (AtspiDocument *obj, GError **error)
 {
-  dbus_int32_t retval = 0;
-
   g_return_val_if_fail (obj != NULL, -1);
 
-  _atspi_dbus_get_property (obj, atspi_interface_document, "PageCount", error, "i", &retval);
-
-  return retval;
+  return a11y_atspi_document_get_page_count (get_document_proxy (obj));
 }
 
 /**
@@ -164,13 +177,9 @@ atspi_document_get_page_count (AtspiDocument *obj, GError **error)
 gint
 atspi_document_get_current_page_number (AtspiDocument *obj, GError **error)
 {
-  dbus_int32_t retval = 0;
-
   g_return_val_if_fail (obj != NULL, -1);
 
-  _atspi_dbus_get_property (obj, atspi_interface_document, "CurrentPageNumber", error, "i", &retval);
-
-  return retval;
+  return a11y_atspi_document_get_current_page_number (get_document_proxy (obj));
 }
 
 static void

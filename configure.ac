@@ -64,6 +64,10 @@ PKG_CHECK_MODULES(GIO, [gio-2.0 >= 2.28])
 AC_SUBST(GIO_LIBS)
 AC_SUBST(GIO_CFLAGS)
 
+PKG_CHECK_MODULES(GIO_UNIX, [gio-unix-2.0 >= 2.28])
+AC_SUBST(GIO_UNIX_LIBS)
+AC_SUBST(GIO_UNIX_CFLAGS)
+
 # --------------------------------------------------------------------
 # Find DL functionality
 

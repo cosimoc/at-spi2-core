@@ -24,6 +24,9 @@
 
 #include "atspi-private.h"
 #include "atspi-accessible-private.h"
+
+#include "xml/a11y-atspi-registry.h"
+
 #include <string.h>
 #include <ctype.h>
 
@@ -37,6 +40,9 @@ typedef struct
   char *name;
   char *detail;
   GArray *properties;
+
+  guint signal_subscription;
+  guint arg0path_signal_subscription;
 } EventListenerEntry;
 
 G_DEFINE_TYPE (AtspiEventListener, atspi_event_listener, G_TYPE_OBJECT)
@@ -303,31 +309,6 @@ cache_process_state_changed (AtspiEvent *event)
                                  event->detail1);
 }
 
-static dbus_bool_t
-demarshal_rect (DBusMessageIter *iter, AtspiRect *rect)
-{
-  dbus_int32_t x, y, width, height;
-  DBusMessageIter iter_struct;
-
-  dbus_message_iter_recurse (iter, &iter_struct);
-  if (dbus_message_iter_get_arg_type (&iter_struct) != DBUS_TYPE_INT32) return FALSE;
-  dbus_message_iter_get_basic (&iter_struct, &x);
-  dbus_message_iter_next (&iter_struct);
-  if (dbus_message_iter_get_arg_type (&iter_struct) != DBUS_TYPE_INT32) return FALSE;
-  dbus_message_iter_get_basic (&iter_struct, &y);
-  dbus_message_iter_next (&iter_struct);
-  if (dbus_message_iter_get_arg_type (&iter_struct) != DBUS_TYPE_INT32) return FALSE;
-  dbus_message_iter_get_basic (&iter_struct, &width);
-  dbus_message_iter_next (&iter_struct);
-  if (dbus_message_iter_get_arg_type (&iter_struct) != DBUS_TYPE_INT32) return FALSE;
-  dbus_message_iter_get_basic (&iter_struct, &height);
-  rect->x = x;
-  rect->y = y;
-  rect->width = width;
-  rect->height = height;
-  return TRUE;
-}
-
 static gchar *
 strdup_and_adjust_for_dbus (const char *s)
 {
@@ -359,7 +340,7 @@ strdup_and_adjust_for_dbus (const char *s)
 }
 
 static gboolean
-convert_event_type_to_dbus (const char *eventType, char **categoryp, char **namep, char **detailp, GPtrArray **matchrule_array)
+convert_event_type_to_dbus (const char *eventType, char **categoryp, char **namep, char **detailp)
 {
   gchar *tmp = strdup_and_adjust_for_dbus (eventType);
   char *category = NULL, *name = NULL, *detail = NULL;
@@ -374,28 +355,6 @@ convert_event_type_to_dbus (const char *eventType, char **categoryp, char **name
     name = g_strdup (name);
     detail = strtok_r (NULL, ":", &saveptr);
     if (detail) detail = g_strdup (detail);
-  }
-  if (matchrule_array)
-  {
-    gchar *matchrule;
-    matchrule = g_strdup_printf ("type='signal',interface='org.a11y.atspi.Event.%s'", category);
-    if (name && name [0])
-    {
-      gchar *new_str = g_strconcat (matchrule, ",member='", name, "'", NULL);
-      g_free (matchrule);
-      matchrule = new_str;
-    }
-    (*matchrule_array) = g_ptr_array_new ();
-    if (detail && detail [0])
-    {
-      gchar *new_str = g_strconcat (matchrule, ",arg0='", detail, "'", NULL);
-      g_ptr_array_add (*matchrule_array, new_str);
-      new_str = g_strconcat (matchrule, ",arg0path='", detail, "/'", NULL);
-      g_ptr_array_add (*matchrule_array, new_str);
-      g_free (matchrule);
-    }
-    else
-      g_ptr_array_add (*matchrule_array, matchrule);
   }
   if (categoryp) *categoryp = category;
   else g_free (category);
@@ -414,7 +373,7 @@ listener_entry_free (EventListenerEntry *e)
   g_free (e->event_type);
   g_free (e->category);
   g_free (e->name);
-  if (e->detail) g_free (e->detail);
+  g_free (e->detail);
   callback_unref (callback);
   g_free (e);
 }
@@ -555,25 +514,45 @@ atspi_event_listener_register_full (AtspiEventListener *listener,
                                                            error);
 }
 
-static gboolean
+static void
+notify_event_deregistered (EventListenerEntry *e)
+{
+  A11yAtspiRegistry *registry_proxy =
+    a11y_atspi_registry_proxy_new_sync (_atspi_bus (), G_DBUS_PROXY_FLAGS_NONE,
+                                        atspi_bus_registry,
+                                        atspi_path_registry,
+                                        NULL, NULL);
+  if (registry_proxy)
+    {
+      a11y_atspi_registry_call_deregister_event_sync (registry_proxy,
+                                                      e->event_type,
+                                                      NULL, NULL);
+      g_object_unref (registry_proxy);
+    }
+}
+
+static void
 notify_event_registered (EventListenerEntry *e)
 {
-
-  if (e->properties)
-    dbind_method_call_reentrant (_atspi_bus (), atspi_bus_registry,
-	                         atspi_path_registry,
-	                         atspi_interface_registry,
-	                         "RegisterEvent",
-	                         NULL, "sas", e->event_type,
-                                 e->properties);
-  else
-    dbind_method_call_reentrant (_atspi_bus (), atspi_bus_registry,
-	                         atspi_path_registry,
-	                         atspi_interface_registry,
-	                         "RegisterEvent",
-	                         NULL, "s", e->event_type);
-
-  return TRUE;
+  A11yAtspiRegistry *registry_proxy =
+    a11y_atspi_registry_proxy_new_sync (_atspi_bus (), G_DBUS_PROXY_FLAGS_NONE,
+                                        atspi_bus_registry,
+                                        atspi_path_registry,
+                                        NULL, NULL);
+  if (registry_proxy)
+    {
+      GVariant *properties = g_variant_new_strv ((const gchar * const *) e->properties->data,
+                                                 e->properties->len);
+      /* Don't use the generated method here, so that we can use g_variant_new()
+       * to generate a variant with the right signature.
+       */
+      g_dbus_proxy_call_sync (G_DBUS_PROXY (registry_proxy),
+                              "RegisterEvent",
+                              g_variant_new ("(s@as)", e->event_type,
+                                             properties),
+                              G_DBUS_CALL_FLAGS_NONE, -1, NULL, NULL);
+      g_object_unref (registry_proxy);
+    }
 }
 
 /**
@@ -622,6 +601,120 @@ copy_event_properties (GArray *src)
   return dst;
 }
 
+#define OLD_EVENT_VARIANT_TYPE "(siiv(so))"
+#define NEW_EVENT_VARIANT_TYPE "(siiva{sv})"
+
+static void
+handle_event (GDBusConnection *connection,
+              const char *sender_name,
+              const char *object_path,
+              const char *interface_name,
+              const char *signal_name,
+              GVariant *parameters,
+              gpointer user_data)
+{
+  GVariant *event_data, *properties = NULL;
+  gchar *converted_type, *detail, *name;
+  const char *category;
+  AtspiEvent e;
+  char *p;
+
+  memset (&e, 0, sizeof (e));
+
+  category = g_utf8_strrchr (interface_name, -1, '.');
+  if (category == NULL)
+    return;
+
+  category++;
+
+  if (g_variant_is_of_type (parameters, G_VARIANT_TYPE (OLD_EVENT_VARIANT_TYPE)))
+    g_variant_get (parameters, OLD_EVENT_VARIANT_TYPE,
+                   &detail, &e.detail1, &e.detail2, &event_data, NULL, NULL);
+  else if (g_variant_is_of_type (parameters, G_VARIANT_TYPE (NEW_EVENT_VARIANT_TYPE)))
+    g_variant_get (parameters, "(siiv@a{sv})",
+                   &detail, &e.detail1, &e.detail2, &event_data, &properties);
+
+  converted_type = convert_name_from_dbus (category, FALSE);
+  name = convert_name_from_dbus (signal_name, FALSE);
+  detail = convert_name_from_dbus (detail, TRUE);
+
+  if (strcasecmp (category, name) != 0)
+    {
+      p = g_strconcat (converted_type, ":", name, NULL);
+      g_free (converted_type);
+      converted_type = p;
+    }
+  else if (detail [0] == '\0')
+    {
+      p = g_strconcat (converted_type, ":",  NULL);
+      g_free (converted_type);
+      converted_type = p;
+    }
+
+  if (detail[0] != '\0')
+    {
+      p = g_strconcat (converted_type, ":", detail, NULL);
+      g_free (converted_type);
+      converted_type = p;
+    }
+
+  e.type = converted_type;
+  e.source = _atspi_ref_accessible (sender_name, object_path);
+  if (e.source == NULL)
+    {
+      g_warning ("Got no valid source accessible for signal for signal %s from interface %s\n", signal_name, interface_name);
+      g_free (converted_type);
+      g_free (name);
+      g_free (detail);
+      return;
+    }
+
+  if (g_variant_is_of_type (event_data, G_VARIANT_TYPE ("(iiii)")))
+    {
+      AtspiRect rect;
+      g_variant_get (event_data, "(iiii)",
+                     &rect.x, &rect.y, &rect.width, &rect.height);
+      g_value_init (&e.any_data, ATSPI_TYPE_RECT);
+      g_value_set_boxed (&e.any_data, &rect);
+    }
+  else if (g_variant_is_of_type (event_data, G_VARIANT_TYPE ("(so)")))
+      {
+        AtspiAccessible *accessible = _atspi_dbus_return_accessible_from_variant (event_data);
+	g_value_init (&e.any_data, ATSPI_TYPE_ACCESSIBLE);
+	g_value_set_instance (&e.any_data, accessible);
+        g_clear_object (&accessible); /* value now owns it */
+      }
+  else if (g_variant_is_of_type (event_data, G_VARIANT_TYPE_STRING))
+    {
+      g_value_init (&e.any_data, G_TYPE_STRING);
+      g_value_set_string (&e.any_data, g_variant_get_string (event_data, NULL));
+    }
+
+  if (properties)
+    _atspi_dbus_update_cache_from_variant (e.source, properties);
+
+  if (!strncmp (e.type, "object:children-changed", 23))
+    cache_process_children_changed (&e);
+  else if (!strncmp (e.type, "object:property-change", 22))
+    cache_process_property_change (&e);
+  else if (!strncmp (e.type, "object:state-changed", 20))
+    cache_process_state_changed (&e);
+  else if (!strncmp (e.type, "focus", 5))
+    /* BGO#663992 - TODO: figure out the real problem */
+    e.source->cached_properties &= ~(ATSPI_CACHE_STATES);
+
+  _atspi_send_event (&e);
+
+  g_free (converted_type);
+  g_free (name);
+  g_free (detail);
+  g_object_unref (e.source);
+  g_value_unset (&e.any_data);
+  g_variant_unref (event_data);
+  if (properties)
+    g_variant_unref (properties);
+}
+
 /**
  * atspi_event_listener_register_from_callback_full:
  * @callback: (scope async): an #AtspiEventListenerCB function pointer.
@@ -643,9 +736,7 @@ atspi_event_listener_register_from_callback_full (AtspiEventListenerCB callback,
 				                  GError **error)
 {
   EventListenerEntry *e;
-  DBusError d_error;
-  GPtrArray *matchrule_array;
-  gint i;
+  gchar *interface;
 
   if (!callback)
     {
@@ -658,35 +749,35 @@ atspi_event_listener_register_from_callback_full (AtspiEventListenerCB callback,
     return FALSE;
   }
 
-  e = g_new (EventListenerEntry, 1);
+  e = g_new0 (EventListenerEntry, 1);
+  if (!convert_event_type_to_dbus (event_type, &e->category, &e->name, &e->detail))
+    {
+      listener_entry_free (e);
+      return FALSE;
+    }
+
   e->event_type = g_strdup (event_type);
   e->callback = callback;
   e->user_data = user_data;
   e->callback_destroyed = callback_destroyed;
   callback_ref (callback == remove_datum ? (gpointer)user_data : (gpointer)callback,
                 callback_destroyed);
-  if (!convert_event_type_to_dbus (event_type, &e->category, &e->name, &e->detail, &matchrule_array))
-  {
-    g_free (e);
-    return FALSE;
-  }
   e->properties = copy_event_properties (properties);
   event_listeners = g_list_prepend (event_listeners, e);
-  for (i = 0; i < matchrule_array->len; i++)
-  {
-    char *matchrule = g_ptr_array_index (matchrule_array, i);
-    dbus_error_init (&d_error);
-    dbus_bus_add_match (_atspi_bus(), matchrule, &d_error);
-    if (dbus_error_is_set (&d_error))
-      {
-        g_warning ("Atspi: Adding match: %s", d_error.message);
-        dbus_error_free (&d_error);
-        /* TODO: Set error */
-      }
 
-    g_free (matchrule);
-  }
-  g_ptr_array_free (matchrule_array, TRUE);
+  interface = g_strdup_printf ("org.a11y.atspi.Event.%s", e->category);
+  e->signal_subscription =
+    g_dbus_connection_signal_subscribe (_atspi_bus (),
+                                        NULL, interface, e->name, NULL,
+                                        e->detail, G_DBUS_SIGNAL_FLAGS_NONE,
+                                        handle_event, NULL, NULL);
+  if (e->detail)
+    e->arg0path_signal_subscription =
+      g_dbus_connection_signal_subscribe (_atspi_bus (),
+                                          NULL, interface, e->name, NULL,
+                                          e->detail, G_DBUS_SIGNAL_FLAGS_MATCH_ARG0_PATH,
+                                          handle_event, NULL, NULL);
+  g_free (interface);
 
   notify_event_registered (e);
   return TRUE;
@@ -703,6 +794,26 @@ _atspi_reregister_event_listeners ()
       e = l->data;
       notify_event_registered (e);
     }
+}
+
+void
+_atspi_register_default_event_listeners (void)
+{
+  g_dbus_connection_signal_subscribe (_atspi_bus (),
+                                      NULL, ATSPI_DBUS_INTERFACE_EVENT_OBJECT,
+                                      "ChildrenChanged", NULL, NULL,
+                                      G_DBUS_SIGNAL_FLAGS_NONE,
+                                      handle_event, NULL, NULL);
+  g_dbus_connection_signal_subscribe (_atspi_bus (),
+                                      NULL, ATSPI_DBUS_INTERFACE_EVENT_OBJECT,
+                                      "PropertyChange", NULL, NULL,
+                                      G_DBUS_SIGNAL_FLAGS_NONE,
+                                      handle_event, NULL, NULL);
+  g_dbus_connection_signal_subscribe (_atspi_bus (),
+                                      NULL, ATSPI_DBUS_INTERFACE_EVENT_OBJECT,
+                                      "StateChanged", NULL, NULL,
+                                      G_DBUS_SIGNAL_FLAGS_NONE,
+                                      handle_event, NULL, NULL);
 }
 
 /**
@@ -783,11 +894,9 @@ atspi_event_listener_deregister_from_callback (AtspiEventListenerCB callback,
 				               GError **error)
 {
   char *category, *name, *detail;
-  GPtrArray *matchrule_array;
-  gint i;
   GList *l;
 
-  if (!convert_event_type_to_dbus (event_type, &category, &name, &detail, &matchrule_array))
+  if (!convert_event_type_to_dbus (event_type, &category, &name, &detail))
   {
     return FALSE;
   }
@@ -806,37 +915,23 @@ atspi_event_listener_deregister_from_callback (AtspiEventListenerCB callback,
         is_superset (detail, e->detail))
     {
       gboolean need_replace;
-      DBusMessage *message, *reply;
       need_replace = (l == event_listeners);
       l = g_list_remove (l, e);
       if (need_replace)
         event_listeners = l;
-      for (i = 0; i < matchrule_array->len; i++)
-      {
-	char *matchrule = g_ptr_array_index (matchrule_array, i);
-	dbus_bus_remove_match (_atspi_bus(), matchrule, NULL);
-      }
-      message = dbus_message_new_method_call (atspi_bus_registry,
-	    atspi_path_registry,
-	    atspi_interface_registry,
-	    "DeregisterEvent");
-      if (!message)
-      return FALSE;
-      dbus_message_append_args (message, DBUS_TYPE_STRING, &event_type, DBUS_TYPE_INVALID);
-      reply = _atspi_dbus_send_with_reply_and_block (message, error);
-      if (reply)
-        dbus_message_unref (reply);
 
+      g_dbus_connection_signal_unsubscribe (_atspi_bus (), e->signal_subscription);
+      if (e->arg0path_signal_subscription)
+        g_dbus_connection_signal_unsubscribe (_atspi_bus (), e->arg0path_signal_subscription);
+
+      notify_event_deregistered (e);
       listener_entry_free (e);
     }
     else l = g_list_next (l);
   }
   g_free (category);
   g_free (name);
-  if (detail) g_free (detail);
-  for (i = 0; i < matchrule_array->len; i++)
-    g_free (g_ptr_array_index (matchrule_array, i));
-  g_ptr_array_free (matchrule_array, TRUE);
+  g_free (detail);
   return TRUE;
 }
 
@@ -914,7 +1009,7 @@ _atspi_send_event (AtspiEvent *e)
     g_value_set_int (&e->any_data, 0);
   }
 
-  if (!convert_event_type_to_dbus (e->type, &category, &name, &detail, NULL))
+  if (!convert_event_type_to_dbus (e->type, &category, &name, &detail))
   {
     g_warning ("Atspi: Couldn't parse event: %s\n", e->type);
     return;
@@ -944,155 +1039,6 @@ _atspi_send_event (AtspiEvent *e)
   g_free (name);
   g_free (category);
   g_list_free (called_listeners);
-}
-
-DBusHandlerResult
-_atspi_dbus_handle_event (DBusConnection *bus, DBusMessage *message, void *data)
-{
-  char *detail = NULL;
-  const char *category = dbus_message_get_interface (message);
-  const char *member = dbus_message_get_member (message);
-  const char *signature = dbus_message_get_signature (message);
-  gchar *name;
-  gchar *converted_type;
-  DBusMessageIter iter, iter_variant;
-  dbus_message_iter_init (message, &iter);
-  AtspiEvent e;
-  dbus_int32_t detail1, detail2;
-  char *p;
-  GHashTable *cache = NULL;
-
-  if (strcmp (signature, "siiv(so)") != 0 &&
-      strcmp (signature, "siiva{sv}") != 0)
-  {
-    g_warning ("Got invalid signature %s for signal %s from interface %s\n", signature, member, category);
-    return DBUS_HANDLER_RESULT_HANDLED;
-  }
-
-  memset (&e, 0, sizeof (e));
-
-  if (category)
-  {
-    category = g_utf8_strrchr (category, -1, '.');
-    if (category == NULL)
-    {
-      // TODO: Error
-      return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
-    }
-    category++;
-  }
-  dbus_message_iter_get_basic (&iter, &detail);
-  dbus_message_iter_next (&iter);
-  dbus_message_iter_get_basic (&iter, &detail1);
-  e.detail1 = detail1;
-  dbus_message_iter_next (&iter);
-  dbus_message_iter_get_basic (&iter, &detail2);
-  e.detail2 = detail2;
-  dbus_message_iter_next (&iter);
-
-  converted_type = convert_name_from_dbus (category, FALSE);
-  name = convert_name_from_dbus (member, FALSE);
-  detail = convert_name_from_dbus (detail, TRUE);
-
-  if (strcasecmp  (category, name) != 0)
-  {
-    p = g_strconcat (converted_type, ":", name, NULL);
-    g_free (converted_type);
-    converted_type = p;
-  }
-  else if (detail [0] == '\0')
-  {
-    p = g_strconcat (converted_type, ":",  NULL);
-    g_free (converted_type);
-    converted_type = p;
-  }
-
-  if (detail[0] != '\0')
-  {
-    p = g_strconcat (converted_type, ":", detail, NULL);
-    g_free (converted_type);
-    converted_type = p;
-  }
-  e.type = converted_type;
-  e.source = _atspi_ref_accessible (dbus_message_get_sender(message), dbus_message_get_path(message));
-  if (e.source == NULL)
-  {
-    g_warning ("Got no valid source accessible for signal for signal %s from interface %s\n", member, category);
-    g_free (converted_type);
-    g_free (name);
-    g_free (detail);
-    return DBUS_HANDLER_RESULT_HANDLED;
-  }
-
-  dbus_message_iter_recurse (&iter, &iter_variant);
-  switch (dbus_message_iter_get_arg_type (&iter_variant))
-  {
-    case DBUS_TYPE_STRUCT:
-    {
-      AtspiRect rect;
-      if (demarshal_rect (&iter_variant, &rect))
-      {
-	g_value_init (&e.any_data, ATSPI_TYPE_RECT);
-	g_value_set_boxed (&e.any_data, &rect);
-      }
-      else
-      {
-        AtspiAccessible *accessible;
-	accessible = _atspi_dbus_return_accessible_from_iter (&iter_variant);
-	g_value_init (&e.any_data, ATSPI_TYPE_ACCESSIBLE);
-	g_value_set_instance (&e.any_data, accessible);
-	if (accessible)
-	  g_object_unref (accessible);	/* value now owns it */
-      }
-      break;
-    }
-    case DBUS_TYPE_STRING:
-    {
-      dbus_message_iter_get_basic (&iter_variant, &p);
-      g_value_init (&e.any_data, G_TYPE_STRING);
-      g_value_set_string (&e.any_data, p);
-      break;
-    }
-  default:
-    break;
-  }
-
-  dbus_message_iter_next (&iter);
-  if (dbus_message_iter_get_arg_type (&iter) == DBUS_TYPE_ARRAY)
-  {
-    /* new form -- parse properties sent with event */
-    cache = _atspi_dbus_update_cache_from_dict (e.source, &iter);
-  }
-
-  if (!strncmp (e.type, "object:children-changed", 23))
-  {
-    cache_process_children_changed (&e);
-  }
-  else if (!strncmp (e.type, "object:property-change", 22))
-  {
-    cache_process_property_change (&e);
-  }
-  else if (!strncmp (e.type, "object:state-changed", 20))
-  {
-    cache_process_state_changed (&e);
-  }
-  else if (!strncmp (e.type, "focus", 5))
-  {
-    /* BGO#663992 - TODO: figure out the real problem */
-    e.source->cached_properties &= ~(ATSPI_CACHE_STATES);
-  }
-
-  _atspi_send_event (&e);
-
-  if (cache)
-    _atspi_accessible_unref_cache (e.source);
-
-  g_free (converted_type);
-  g_free (name);
-  g_free (detail);
-  g_object_unref (e.source);
-  g_value_unset (&e.any_data);
-  return DBUS_HANDLER_RESULT_HANDLED;
 }
 
 G_DEFINE_BOXED_TYPE (AtspiEvent, atspi_event, atspi_event_copy, atspi_event_free)
