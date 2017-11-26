@@ -85,14 +85,6 @@ _atspi_dbus_return_hyperlink_from_variant (GVariant *variant);
 
 dbus_bool_t _atspi_dbus_call (gpointer obj, const char *interface, const char *method, GError **error, const char *type, ...);
 
-DBusMessage *_atspi_dbus_call_partial (gpointer obj, const char *interface, const char *method, GError **error, const char *type, ...);
-
-DBusMessage *_atspi_dbus_call_partial_va (gpointer obj, const char *interface, const char *method, GError **error, const char *type, va_list args);
-
-dbus_bool_t _atspi_dbus_get_property (gpointer obj, const char *interface, const char *name, GError **error, const char *type, void *data);
-
-DBusMessage * _atspi_dbus_send_with_reply_and_block (DBusMessage *message, GError **error);
-
 GHashTable *_atspi_dbus_return_hash_from_variant (GVariant *variant);
 
 GArray *_atspi_dbus_return_attribute_array_from_variant (GVariant *variant);

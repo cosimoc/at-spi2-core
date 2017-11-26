@@ -248,18 +248,6 @@ ref_hyperlink (const char *app_name, const char *path)
   return hyperlink;
 }
 
-typedef struct
-{
-  char *path;
-  char *parent;
-  GArray *children;
-  GArray *interfaces;
-  char *name;
-  dbus_uint32_t role;
-  char *description;
-  GArray *state_bitflags;
-} CACHE_ADDITION;
-
 static gboolean
 add_app_to_desktop (AtspiAccessible *a, const char *bus_name)
 {
@@ -532,75 +520,6 @@ atspi_exit (void)
   return leaked;
 }
 
-static GSList *hung_processes;
-
-static void
-remove_hung_process (DBusPendingCall *pending, void *data)
-{
-  hung_processes = g_slist_remove (hung_processes, data);
-  g_free (data);
-  dbus_pending_call_unref (pending);
-}
-
-static void
-check_for_hang (DBusMessage *message, DBusError *error, DBusConnection *bus, const char *bus_name)
-{
-  if (!message && error->name &&
-      !strcmp (error->name, "org.freedesktop.DBus.Error.NoReply"))
-  {
-    GSList *l;
-    DBusMessage *message;
-    gchar *bus_name_dup;
-    DBusPendingCall *pending = NULL;
-    for (l = hung_processes; l; l = l->next)
-      if (!strcmp (l->data, bus_name))
-        return;
-    message = dbus_message_new_method_call (bus_name, "/",
-                                            "org.freedesktop.DBus.Peer",
-                                            "Ping");
-    if (!message)
-      return;
-    dbus_connection_send_with_reply (bus, message, &pending, -1);
-    dbus_message_unref (message);
-    if (!pending)
-      return;
-    bus_name_dup = g_strdup (bus_name);
-    hung_processes = g_slist_append (hung_processes, bus_name_dup);
-    dbus_pending_call_set_notify (pending, remove_hung_process, bus_name_dup, NULL);
-  }
-}
-
-static gboolean
-connection_is_hung (const char *bus_name)
-{
-  GSList *l;
-
-  for (l = hung_processes; l; l = l->next)
-    if (!strcmp (l->data, bus_name))
-      return TRUE;
-  return FALSE;
-}
-
-static gboolean
-check_app (AtspiApplication *app, GError **error)
-{
-  if (!app || !app->application_proxy)
-  {
-    g_set_error_literal (error, ATSPI_ERROR, ATSPI_ERROR_APPLICATION_GONE,
-                          _("The application no longer exists"));
-    return FALSE;
-  }
-
-  if (atspi_main_loop && connection_is_hung (app->bus_name))
-  {
-      g_set_error_literal (error, ATSPI_ERROR, ATSPI_ERROR_IPC,
-                           "The process appears to be hung.");
-    return FALSE;
-  }
-
-  return TRUE;
-}
-
 static void
 set_timeout (AtspiApplication *app)
 {
@@ -633,28 +552,6 @@ _atspi_dbus_return_hash_from_variant (GVariant *variant)
     g_hash_table_insert (ret, name, value);
 
   return ret;
-}
-
-GHashTable *
-_atspi_dbus_hash_from_iter (DBusMessageIter *iter)
-{
-  GHashTable *hash = g_hash_table_new_full (g_str_hash, g_str_equal,
-                                            (GDestroyNotify) g_free,
-                                            (GDestroyNotify) g_free);
-  DBusMessageIter iter_array, iter_dict;
-
-  dbus_message_iter_recurse (iter, &iter_array);
-  while (dbus_message_iter_get_arg_type (&iter_array) != DBUS_TYPE_INVALID)
-  {
-    const char *name, *value;
-    dbus_message_iter_recurse (&iter_array, &iter_dict);
-    dbus_message_iter_get_basic (&iter_dict, &name);
-    dbus_message_iter_next (&iter_dict);
-    dbus_message_iter_get_basic (&iter_dict, &value);
-    g_hash_table_insert (hash, g_strdup (name), g_strdup (value));
-    dbus_message_iter_next (&iter_array);
-  }
-  return hash;
 }
 
 GArray *
