@@ -32,8 +32,6 @@
 
 #include "atspi.h"
 
-#include "dbus/dbus.h"
-
 G_BEGIN_DECLS
 
 typedef struct _AtspiReference AtspiReference;

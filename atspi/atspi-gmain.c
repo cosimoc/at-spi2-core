@@ -25,8 +25,7 @@
  */
 
 #include <config.h>
-#include <dbus/dbus.h>
-#include "glib.h"
+#include "atspi-gmain.h"
 #include <string.h>
 
 #include <libintl.h>

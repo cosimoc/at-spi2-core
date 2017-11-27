@@ -24,6 +24,9 @@
 #ifndef _ATSPI_GMAIN_H
 #define _ATSPI_GMAIN_H
 
+#include <dbus/dbus.h>
+#include <glib-object.h>
+
 G_BEGIN_DECLS
 
 void

@@ -29,7 +29,6 @@
 #include "glib-object.h"
 
 #include "atspi-matchrule.h"
-#include "dbus/dbus.h"
 
 G_BEGIN_DECLS
 

@@ -32,7 +32,6 @@
 #ifdef HAVE_X11
 #include "X11/Xlib.h"
 #endif
-#include "atspi-gmain.h"
 #include <stdio.h>
 #include <string.h>
 
