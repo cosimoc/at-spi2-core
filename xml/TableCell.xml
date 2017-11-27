@@ -18,5 +18,13 @@
     <arg direction="out" name="col_extents" type="i" />
   </method>
 
+  <method name="GetColumnHeaderCells">
+    <arg direction="out" type="a(so)" />
+  </method>
+
+  <method name="GetRowHeaderCells">
+    <arg direction="out" type="a(so)" />
+  </method>
+
 </interface>
 </node>

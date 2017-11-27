@@ -3,7 +3,7 @@
 <interface name="org.a11y.atspi.Registry">
 
   <method name="RegisterEvent">
-    <arg direction="in" name="event" type="s">
+    <arg direction="in" name="event" type="sas">
     </arg>
   </method>
 
@@ -20,6 +20,7 @@
   <signal name="EventListenerRegistered">
     <arg direction="out" name="bus" type="s"/>
     <arg direction="out" name="path" type="s"/>
+    <arg direction="out" name="properties" type="as"/>
   </signal>
 
   <signal name="EventListenerDeregistered">

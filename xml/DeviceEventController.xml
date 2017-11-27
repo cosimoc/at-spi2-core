@@ -8,9 +8,7 @@
       <annotation name="com.trolltech.QtDBus.QtTypeName.In1" value="QSpiKeyTypeArray"/>
     </arg>
     <arg direction="in" name="mask" type="u"/>
-    <arg direction="in" name="type" type="au">
-      <annotation name="com.trolltech.QtDBus.QtTypeName.In3" value="QSpiEventTypeArray"/>
-    </arg>
+    <arg direction="in" name="type" type="u"/>
     <arg direction="in" name="mode" type="(bbb)">
       <annotation name="com.trolltech.QtDBus.QtTypeName.In4" value="QSpiEventMode"/>
     </arg>
@@ -58,6 +56,14 @@
   <method name="NotifyListenersAsync">
     <arg direction="in" name="event" type="(uiuuisb)"/>
     <annotation name="com.trolltech.QtDBus.QtTypeName.In0" value="QSpiDeviceEvent"/>
+  </method>
+
+  <method name="GetDeviceEventListeners">
+    <arg direction="out" name="listeners" type="a(sou)"/>
+  </method>
+
+  <method name="GetKeystrokeListeners">
+    <arg direction="out" name="listeners" type="a(souua(iisi)u(bbb))"/>
   </method>
 
 </interface>

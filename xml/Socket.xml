@@ -21,7 +21,7 @@
     <arg direction="in" name="socket" type="(so)">
       <annotation name="com.trolltech.QtDBus.QtTypeName.In0" value="QSpiObjectReference"/>
     </arg>
-  </method>
+  </signal>
 
 </interface>
 </node>
