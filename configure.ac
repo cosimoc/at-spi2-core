@@ -161,10 +161,6 @@ AC_CHECK_ALIGNOF(dbus_int16_t, [#include <dbus/dbus.h>])
 AC_CHECK_ALIGNOF(dbus_int32_t, [#include <dbus/dbus.h>])
 AC_CHECK_ALIGNOF(dbus_int64_t, [#include <dbus/dbus.h>])
 AC_CHECK_ALIGNOF(double, [#include <dbus/dbus.h>])
-AC_CHECK_ALIGNOF(dbind_pointer, [AC_INCLUDES_DEFAULT
-typedef void *dbind_pointer;])
-AC_CHECK_ALIGNOF(dbind_struct, [AC_INCLUDES_DEFAULT
-typedef struct {char s1;} dbind_struct;])
 
 GTK_DOC_CHECK([1.25])
 
@@ -178,7 +174,6 @@ AC_CONFIG_FILES([
         Makefile
         po/Makefile.in
 	xml/Makefile
-	dbind/Makefile
 	atspi/Makefile
 	registryd/Makefile
 	bus/Makefile

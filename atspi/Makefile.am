@@ -15,7 +15,6 @@ libatspi_la_LDFLAGS = \
 
 libatspi_la_CFLAGS = \
 	$(DBUS_CFLAGS) \
-	$(DBIND_CFLAGS) \
 	$(GLIB_CFLAGS) \
 	-I$(top_srcdir)/registryd \
 	-I$(top_builddir)/registryd \
@@ -26,11 +25,9 @@ libatspi_la_LIBADD = \
 	$(DBUS_LIBS) \
 	$(GOBJ_LIBS) \
 	$(X11_LIBS) \
-	$(top_builddir)/dbind/libdbind.la \
 	$(top_builddir)/xml/liba11yatspi-dbus.la
 
 libatspi_la_DEPENDENCIES = \
-	$(top_builddir)/dbind/libdbind.la \
 	$(top_builddir)/xml/liba11yatspi-dbus.la \
 	$(NULL)
 
@@ -146,7 +143,7 @@ Atspi-2.0.gir: libatspi.la
 Atspi_2_0_gir_INCLUDES = DBus-1.0 GLib-2.0 GObject-2.0
 Atspi_2_0_gir_EXPORT_PACKAGES = atspi-2
 Atspi_2_0_gir_CFLAGS = -I$(top_builddir) -I$(top_srcdir)
-Atspi_2_0_gir_LIBS = libatspi.la $(top_builddir)/dbind/libdbind.la $(top_builddir)/xml/liba11yatspi-dbus.la
+Atspi_2_0_gir_LIBS = libatspi.la $(top_builddir)/xml/liba11yatspi-dbus.la
 Atspi_2_0_gir_FILES = $(libatspi_la_SOURCES) $(atspi_headers) atspi-enum-types.c atspi-enum-types.h
 Atspi_2_0_gir_SCANNERFLAGS = --namespace Atspi --nsversion=2.0
 INTROSPECTION_SCANNER_ARGS += --c-include='atspi/atspi.h'

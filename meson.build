@@ -90,9 +90,6 @@ foreach a: dbus_alignments
                   cc.alignment(a, prefix: '#include <dbus/dbus.h>', dependencies: libdbus_dep))
 endforeach
 
-at_spi_conf.set('ALIGNOF_DBIND_POINTER', cc.alignment('dbind_pointer', prefix: 'typedef void *dbind_pointer;'))
-at_spi_conf.set('ALIGNOF_DBIND_STRUCT', cc.alignment('dbind_struct', prefix: 'typedef struct { char s1; } dbind_struct;'))
-
 # introspection support
 have_gir = false
 
@@ -125,7 +122,6 @@ configure_file(input: 'atspi-2.pc.in',
 
 gnome = import('gnome')
 
-subdir('dbind')
 subdir('atspi')
 subdir('bus')
 subdir('registryd')
