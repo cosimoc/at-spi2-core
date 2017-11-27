@@ -545,8 +545,6 @@ _atspi_dbus_return_hash_from_variant (GVariant *variant)
                                            (GDestroyNotify) g_free,
                                            (GDestroyNotify) g_free);
 
-  //_ATSPI_DBUS_CHECK_SIG (message, "a{ss}", NULL, NULL);
-
   g_variant_iter_init (&iter, variant);
   while (g_variant_iter_next (&iter, "{ss}", &name, &value))
     g_hash_table_insert (ret, name, value);
@@ -560,8 +558,6 @@ _atspi_dbus_return_attribute_array_from_variant (GVariant *variant)
   GVariantIter iter;
   const gchar *name, *value;
   GArray *ret = g_array_new (TRUE, TRUE, sizeof (gchar *));
-
-  //_ATSPI_DBUS_CHECK_SIG (message, "a{ss}", NULL, NULL);
 
   g_variant_iter_init (&iter, variant);
   while (g_variant_iter_loop (&iter, "{ss}", &name, &value))

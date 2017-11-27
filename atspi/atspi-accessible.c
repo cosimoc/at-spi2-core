@@ -426,7 +426,6 @@ atspi_accessible_get_relation_set (AtspiAccessible *obj, GError **error)
   if (!a11y_atspi_accessible_call_get_relation_set_sync (obj->priv->accessible_proxy,
                                                          &variant, NULL, error))
     return NULL;
-  //_ATSPI_DBUS_CHECK_SIG (reply, "a(ua(so))", error, NULL);
 
   ret = g_array_new (TRUE, TRUE, sizeof (AtspiRelation *));
   g_variant_iter_init (&iter, variant);

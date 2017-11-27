@@ -93,26 +93,6 @@ void _atspi_dbus_set_interfaces (AtspiAccessible *accessible, const char **inter
 
 void _atspi_dbus_set_state (AtspiAccessible *accessible, GVariant *variant);
 
-#define _ATSPI_DBUS_CHECK_SIG(message, type, error, ret) \
-  if (!message) \
-    return (ret); \
-  if (dbus_message_get_type (message) == DBUS_MESSAGE_TYPE_ERROR) \
-  { \
-    const char *err; \
-    dbus_message_get_args (message, NULL, DBUS_TYPE_STRING, &err, DBUS_TYPE_INVALID); \
-    if (err) \
-      g_set_error_literal (error, ATSPI_ERROR, ATSPI_ERROR_IPC, err); \
-    dbus_message_unref (message); \
-    return ret; \
-  } \
-  if (strcmp (dbus_message_get_signature (message), type) != 0) \
-  { \
-    g_warning ("at-spi: Expected message signature %s but got %s at %s line %d", type, dbus_message_get_signature (message), __FILE__, __LINE__); \
-    dbus_message_unref (message); \
-    return (ret); \
-  }
-
-
 /**
  * ATSPI_ERROR:
  *

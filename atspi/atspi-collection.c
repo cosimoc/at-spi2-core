@@ -57,8 +57,6 @@ return_accessibles (GVariant *variant)
   GVariantIter iter;
   GArray *ret = g_array_new (TRUE, TRUE, sizeof (AtspiAccessible *));
 
-  //_ATSPI_DBUS_CHECK_SIG (message, "a(so)", NULL, NULL);
-
   g_variant_iter_init (&iter, variant);
   while ((value = g_variant_iter_next_value (&iter)))
     {
