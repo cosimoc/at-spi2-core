@@ -520,22 +520,6 @@ atspi_exit (void)
   return leaked;
 }
 
-static void
-set_timeout (AtspiApplication *app)
-{
-  struct timeval tv;
-  int diff;
-
-  if (app && app_startup_time > 0)
-  {
-    gettimeofday (&tv, NULL);
-    diff = (tv.tv_sec - app->time_added.tv_sec) * 1000 + (tv.tv_usec - app->time_added.tv_usec) / 1000;
-    dbind_set_timeout (MAX(method_call_timeout, app_startup_time - diff));
-  }
-  else
-    dbind_set_timeout (method_call_timeout);
-}
-
 GHashTable *
 _atspi_dbus_return_hash_from_variant (GVariant *variant)
 {
@@ -800,12 +784,12 @@ atspi_get_a11y_gdbus (void)
  *
  * By default, the normal timeout is set to 800 ms, and the application startup
  * timeout is set to 15 seconds.
+ *
+ * Deprecated: 2.28: this function does nothing
  */
 void
 atspi_set_timeout (gint val, gint startup_time)
 {
-  method_call_timeout = val;
-  app_startup_time = startup_time;
 }
 
 /**
