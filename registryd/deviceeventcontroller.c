@@ -82,14 +82,14 @@ typedef struct {
   guint                             pending_remove : 1;
 
   Accessibility_ControllerEventMask mod_mask;
-  dbus_uint32_t               key_val;  /* KeyCode */
+  guint32               key_val;  /* KeyCode */
 } DEControllerGrabMask;
 
 
 gboolean spi_controller_update_key_grabs               (SpiDEController           *controller,
 							       Accessibility_DeviceEvent *recv);
 
-static gboolean eventtype_seq_contains_event (dbus_uint32_t types,
+static gboolean eventtype_seq_contains_event (guint32 types,
 					      const Accessibility_DeviceEvent *event);
 static gboolean spi_dec_poll_mouse_moving (gpointer data);
 static gboolean spi_dec_poll_mouse_idle (gpointer data);
@@ -225,30 +225,6 @@ spi_dec_plat_generate_mouse_event (SpiDEController *controller,
   klass = SPI_DEVICE_EVENT_CONTROLLER_GET_CLASS (controller);
   if (klass->plat.generate_mouse_event)
     klass->plat.generate_mouse_event (controller, x, y, eventName);
-}
-
-/* Private methods */
-static dbus_bool_t
-spi_dbus_add_disconnect_match (DBusConnection *bus, const char *name)
-{
-  char *match = g_strdup_printf ("interface=%s,member=NameOwnerChanged,arg0=%s", DBUS_INTERFACE_DBUS, name);
-  if (match)
-  {
-    DBusError error;
-    dbus_error_init (&error);
-    dbus_bus_add_match (bus, match, &error);
-    g_free (match);
-    if (dbus_error_is_set (&error))
-      {
-        dbus_error_free (&error);
-        return FALSE;
-      }
-    else
-      {
-        return TRUE;
-      }
-  }
-  else return FALSE;
 }
 
 static DEControllerGrabMask *
@@ -663,111 +639,6 @@ spi_controller_register_device_listener (SpiDEController      *controller,
   return FALSE;
 }
 
-static void
-set_reply (DBusPendingCall *pending, void *user_data)
-{
-    void **replyptr = (void **)user_data;
-
-    *replyptr = dbus_pending_call_steal_reply (pending);
-}
-
-static GSList *hung_processes = NULL;
-
-static void
-reset_hung_process (DBusPendingCall *pending, void *data)
-{
-  DBusMessage *message = data;
-  const char *dest = dbus_message_get_destination (message);
-  GSList *l;
-
-  /* At this point we don't care about the result */
-  dbus_pending_call_unref (pending);
-
-  for (l = hung_processes; l; l = l->next)
-  {
-    if (!strcmp (l->data, dest))
-    {
-      g_free (l->data);
-      hung_processes = g_slist_remove (hung_processes, l->data);
-      break;
-    }
-  }
-}
-
-static gint
-time_elapsed (struct timeval *origin)
-{
-  struct timeval tv;
-
-  gettimeofday (&tv, NULL);
-  return (tv.tv_sec - origin->tv_sec) * 1000 + (tv.tv_usec - origin->tv_usec) / 1000;
-}
-
-static void
-reset_hung_process_from_ping (DBusPendingCall *pending, void *data)
-{
-  GSList *l;
-
-  for (l = hung_processes; l; l = l->next)
-  {
-    if (!strcmp (l->data, data))
-    {
-      g_free (l->data);
-      hung_processes = g_slist_remove (hung_processes, l->data);
-      break;
-    }
-  }
-  g_free (data);
-  dbus_pending_call_unref (pending);
-}
-
-static DBusMessage *
-send_and_allow_reentry (DBusConnection *bus, DBusMessage *message, int timeout, DBusError *error)
-{
-    DBusPendingCall *pending;
-    DBusMessage *reply = NULL;
-  struct timeval tv;
-
-    if (!dbus_connection_send_with_reply (bus, message, &pending, -1))
-    {
-        return NULL;
-    }
-    dbus_pending_call_set_notify (pending, set_reply, (void *)&reply, NULL);
-    gettimeofday (&tv, NULL);
-    while (!reply)
-    {
-      if (!dbus_connection_read_write_dispatch (bus, timeout) ||
-          time_elapsed (&tv) > timeout)
-      {
-        const char *dest = dbus_message_get_destination (message);
-        GSList *l;
-        gchar *bus_name_dup;
-        dbus_message_ref (message);
-        dbus_pending_call_set_notify (pending, reset_hung_process, message,
-                                      (DBusFreeFunction) dbus_message_unref);
-        message = dbus_message_new_method_call (dest, "/",
-                                                "org.freedesktop.DBus.Peer",
-                                                "Ping");
-        if (!message)
-          return NULL;
-        dbus_connection_send_with_reply (bus, message, &pending, -1);
-        dbus_message_unref (message);
-        if (!pending)
-          return NULL;
-        bus_name_dup = g_strdup (dest);
-        dbus_pending_call_set_notify (pending, reset_hung_process_from_ping,
-                                      bus_name_dup, NULL);
-        for (l = hung_processes; l; l = l->next)
-          if (!strcmp (l->data, dest))
-            return NULL;
-        hung_pr ocesses = g_slist_prepend (hung_processes, g_strdup (dest));
-        return NULL;
-      }
-    }
-    dbus_pending_call_unref (pending);
-    return reply;
-}
-
 gboolean
 spi_controller_notify_mouselisteners (SpiDEController                 *controller,
 				      const Accessibility_DeviceEvent *event)
@@ -856,11 +727,11 @@ key_set_contains_key (GSList                          *key_set,
                 (int) key_event->hw_code,
                 key_event->event_string); 
 #endif
-      if (kd->keysym == (dbus_uint32_t) key_event->id)
+      if (kd->keysym == (guint32) key_event->id)
         {
           return TRUE;
 	}
-      if (kd->keycode == (dbus_uint32_t) key_event->hw_code)
+      if (kd->keycode == (guint32) key_event->hw_code)
         {
           return TRUE;
 	}
@@ -875,7 +746,7 @@ key_set_contains_key (GSList                          *key_set,
 }
 
 static gboolean
-eventtype_seq_contains_event (dbus_uint32_t types,
+eventtype_seq_contains_event (guint32 types,
 				  const Accessibility_DeviceEvent *event)
 {
   if (types == 0) /* special case, means "all events/any event" */
@@ -889,9 +760,9 @@ eventtype_seq_contains_event (dbus_uint32_t types,
 static gboolean
 spi_key_event_matches_listener (const Accessibility_DeviceEvent *key_event,
 				DEControllerKeyListener         *listener,
-				dbus_bool_t                    is_system_global)
+				gboolean                    is_system_global)
 {
-  if (((key_event->modifiers & 0xFF) == (dbus_uint16_t) (listener->mask & 0xFF)) &&
+  if (((key_event->modifiers & 0xFF) == (guint16) (listener->mask & 0xFF)) &&
        key_set_contains_key (listener->keys, key_event) &&
        eventtype_seq_contains_event (listener->listener.types, key_event) && 
       (is_system_global == listener->mode->global))

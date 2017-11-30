@@ -356,7 +356,7 @@ spi_dec_button_update_and_emit (SpiDEController *controller,
 	  Accessibility_BUTTON_RELEASED_EVENT;
 	mouse_e.id        = button_number;
 	mouse_e.hw_code   = button_number;
-	mouse_e.modifiers = (dbus_uint16_t) mouse_mask_state; 
+	mouse_e.modifiers = (guint16) mouse_mask_state;
 	mouse_e.timestamp = 0;
 	mouse_e.event_string = "";
 	mouse_e.is_text   = FALSE;
@@ -365,7 +365,7 @@ spi_dec_button_update_and_emit (SpiDEController *controller,
 						&mouse_e);
 	if (!is_consumed)
 	  {
-	    dbus_uint32_t x = last_mouse_pos->x, y = last_mouse_pos->y;
+	    guint32 x = last_mouse_pos->x, y = last_mouse_pos->y;
 	    spi_dec_dbus_emit(controller, SPI_DBUS_INTERFACE_EVENT_MOUSE, "Button", event_detail, x, y);
 	  }
 	else
@@ -408,7 +408,7 @@ spi_dec_x11_mouse_check (SpiDEController *controller,
   if (*x != last_mouse_pos->x || *y != last_mouse_pos->y) 
     {
       // TODO: combine these two signals?
-      dbus_uint32_t ix = *x, iy = *y;
+      guint32 ix = *x, iy = *y;
       spi_dec_dbus_emit(controller, SPI_DBUS_INTERFACE_EVENT_MOUSE, "Abs", "", ix, iy);
       ix -= last_mouse_pos->x;
       iy -= last_mouse_pos->y;
@@ -480,7 +480,7 @@ spi_device_event_controller_forward_mouse_event (SpiDEController *controller,
   gboolean is_consumed = FALSE;
   gboolean xkb_mod_unlatch_occurred;
   XButtonEvent *xbutton_event = (XButtonEvent *) xevent;
-  dbus_uint32_t ix, iy;
+  guint32 ix, iy;
 
   int button = xbutton_event->button;
   
@@ -523,8 +523,8 @@ spi_device_event_controller_forward_mouse_event (SpiDEController *controller,
                       Accessibility_BUTTON_RELEASED_EVENT;
   mouse_e.id        = button;
   mouse_e.hw_code   = button;
-  mouse_e.modifiers = (dbus_uint16_t) xbutton_event->state;
-  mouse_e.timestamp = (dbus_uint32_t) xbutton_event->time;
+  mouse_e.modifiers = (guint16) xbutton_event->state;
+  mouse_e.timestamp = (guint32) xbutton_event->time;
   mouse_e.event_string = "";
   mouse_e.is_text   = FALSE;
   if ((mouse_button_state & mouse_button_mask) != 
@@ -794,8 +794,8 @@ spi_keystroke_from_x_key_event (XKeyEvent *x_key_event)
   int nbytes;
 
   nbytes = XLookupString (x_key_event, cbuf, cbuf_bytes, &keysym, NULL);  
-  key_event.id = (dbus_int32_t)(keysym);
-  key_event.hw_code = (dbus_int16_t) x_key_event->keycode;
+  key_event.id = (gint32)(keysym);
+  key_event.hw_code = (gint16) x_key_event->keycode;
   if (((XEvent *) x_key_event)->type == KeyPress)
     {
       key_event.type = Accessibility_KEY_PRESSED_EVENT;
@@ -804,7 +804,7 @@ spi_keystroke_from_x_key_event (XKeyEvent *x_key_event)
     {
       key_event.type = Accessibility_KEY_RELEASED_EVENT;
     } 
-  key_event.modifiers = (dbus_uint16_t)(x_key_event->state);
+  key_event.modifiers = (guint16)(x_key_event->state);
   key_event.is_text = FALSE;
   switch (keysym)
     {
@@ -902,7 +902,7 @@ spi_keystroke_from_x_key_event (XKeyEvent *x_key_event)
           }
     }
 
-  key_event.timestamp = (dbus_uint32_t) x_key_event->time;
+  key_event.timestamp = (guint32) x_key_event->time;
 #ifdef SPI_KEYEVENT_DEBUG
   {
     char *pressed_str  = "pressed";
@@ -1317,7 +1317,7 @@ static void
 spi_dec_x11_emit_modifier_event (SpiDEController *controller, guint prev_mask, 
 			     guint current_mask)
 {
-  dbus_uint32_t d1, d2;
+  guint32 d1, d2;
 
 #ifdef SPI_XKB_DEBUG
   fprintf (stderr, "MODIFIER CHANGE EVENT! %x to %x\n", 

@@ -25,8 +25,6 @@
 #ifndef SPI_DE_TYPES_H_
 #define SPI_DE_TYPES_H_
 
-#include <dbus/dbus.h>
-
 typedef unsigned long Accessibility_ControllerEventMask;
 
 typedef enum {
@@ -53,29 +51,29 @@ typedef struct _Accessibility_DeviceEvent Accessibility_DeviceEvent;
 struct _Accessibility_DeviceEvent
 {
   Accessibility_EventType type;
-  dbus_uint32_t id;
-  dbus_uint32_t hw_code;
-  dbus_uint32_t modifiers;
-  dbus_uint32_t timestamp;
+  guint32 id;
+  guint32 hw_code;
+  guint32 modifiers;
+  guint32 timestamp;
   char * event_string;
-  dbus_bool_t is_text;
+  gboolean is_text;
 };
 
 typedef struct _Accessibility_EventListenerMode Accessibility_EventListenerMode;
 struct _Accessibility_EventListenerMode
 {
-  dbus_bool_t synchronous;
-  dbus_bool_t preemptive;
-  dbus_bool_t global;
+  gboolean synchronous;
+  gboolean preemptive;
+  gboolean global;
 };
 
 typedef struct _Accessibility_KeyDefinition Accessibility_KeyDefinition;
 struct _Accessibility_KeyDefinition
 {
-  dbus_int32_t keycode;
-  dbus_int32_t keysym;
+  gint32 keycode;
+  gint32 keysym;
   char *keystring;
-  dbus_int32_t unused;
+  gint32 unused;
 };
 
 #endif /* SPI_DE_TYPES_H_ */

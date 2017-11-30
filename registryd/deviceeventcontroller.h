@@ -137,7 +137,7 @@ typedef struct {
 
 GType            spi_device_event_controller_get_type (void);
 SpiDEController *spi_device_event_controller_new      (SpiRegistry    *registry,
-                                                       DBusConnection *bus);
+                                                       GDBusConnection *bus);
 
 gboolean spi_clear_error_state (void);
 
@@ -155,7 +155,7 @@ spi_controller_notify_mouselisteners (SpiDEController                 *controlle
 gboolean
 spi_controller_notify_keylisteners (SpiDEController                 *controller,
 				    Accessibility_DeviceEvent       *key_event,
-				    dbus_bool_t                    is_system_global);
+				    gboolean                         is_system_global);
 
 gboolean spi_controller_update_key_grabs               (SpiDEController           *controller,
 							       Accessibility_DeviceEvent *recv);

@@ -29,8 +29,6 @@
 #include <stdio.h>
 #include <dlfcn.h>
 
-#include <dbus/dbus.h>
-
 #include "paths.h"
 #include "registry.h"
 #include "deviceeventcontroller.h"
