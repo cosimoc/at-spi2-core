@@ -27,7 +27,6 @@
 #ifdef HAVE_X11
 #include <X11/Xlib.h>
 #endif
-#include <dbus/dbus.h>
 
 typedef struct _SpiDEController SpiDEController;
 
@@ -45,13 +44,11 @@ G_BEGIN_DECLS
 
 struct _SpiDEController {
 	GObject parent;
-	DBusConnection *bus;
+	GDBusConnection *bus;
 	SpiRegistry    *registry;
 	GList          *key_listeners;
 	GList          *mouse_listeners;
 	GList          *keygrabs_list;
-	GQueue *message_queue;
-	guint message_queue_idle;
 };
 
 typedef enum {
@@ -61,6 +58,7 @@ typedef enum {
 } SpiDeviceTypeCategory;
 
 typedef struct {
+  GDBusProxy *proxy;
   char *bus_name;
   char *path;
   SpiDeviceTypeCategory type;
@@ -148,7 +146,7 @@ void spi_device_event_controller_stop_poll_mouse (void);
 
 void spi_remove_device_listeners (SpiDEController *controller, const char *bus_name);
 
-SpiDEController *spi_registry_dec_new (SpiRegistry *reg, DBusConnection *bus);
+SpiDEController *spi_registry_dec_new (SpiRegistry *reg, GDBusConnection *bus);
 
 gboolean
 spi_controller_notify_mouselisteners (SpiDEController                 *controller,

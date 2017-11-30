@@ -36,8 +36,6 @@
 
 #include <glib.h>
 
-#include <dbus/dbus.h>
-
 #include "paths.h"
 #include "de-types.h"
 #include "de-marshaller.h"
@@ -51,11 +49,11 @@
 #include "deviceeventcontroller.h"
 #include "reentrant-list.h"
 
-#include "introspection.h"
+#include "xml/a11y-atspi-device-event-controller.h"
+#include "xml/a11y-atspi-device-event-listener.h"
 
 #define CHECK_RELEASE_DELAY 20
 #define BIT(c, x)       (c[x/8]&(1<<(x%8)))
-static SpiDEController *saved_controller;
 
 /* Our parent Gtk object type */
 #define PARENT_TYPE G_TYPE_OBJECT
@@ -98,6 +96,8 @@ static gboolean spi_dec_poll_mouse_moving (gpointer data);
 static gboolean spi_dec_poll_mouse_idle (gpointer data);
 
 typedef struct {
+  A11yAtspiDeviceEventController *dec_skel;
+  guint bus_filter_id;
 } SpiDEControllerPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE (SpiDEController, spi_device_event_controller, G_TYPE_OBJECT)
@@ -228,24 +228,6 @@ spi_dec_plat_generate_mouse_event (SpiDEController *controller,
     klass->plat.generate_mouse_event (controller, x, y, eventName);
 }
 
-DBusMessage *
-invalid_arguments_error (DBusMessage *message)
-{
-    DBusMessage *reply;
-    gchar       *errmsg;
-
-    errmsg= g_strdup_printf (
-            "Method \"%s\" with signature \"%s\" on interface \"%s\" was supplied with invalid arguments\n",
-            dbus_message_get_member (message),
-            dbus_message_get_signature (message),
-            dbus_message_get_interface (message));
-    reply = dbus_message_new_error (message,
-                                    DBUS_ERROR_INVALID_ARGS,
-                                    errmsg);
-    g_free (errmsg);
-    return reply;
-}
-
 /* Private methods */
 static dbus_bool_t
 spi_dbus_add_disconnect_match (DBusConnection *bus, const char *name)
@@ -256,29 +238,6 @@ spi_dbus_add_disconnect_match (DBusConnection *bus, const char *name)
     DBusError error;
     dbus_error_init (&error);
     dbus_bus_add_match (bus, match, &error);
-    g_free (match);
-    if (dbus_error_is_set (&error))
-      {
-        dbus_error_free (&error);
-        return FALSE;
-      }
-    else
-      {
-        return TRUE;
-      }
-  }
-  else return FALSE;
-}
-
-static dbus_bool_t
-spi_dbus_remove_disconnect_match (DBusConnection *bus, const char *name)
-{
-  char *match = g_strdup_printf ("interface=%s,member=NameOwnerChanged,arg0=%s", DBUS_INTERFACE_DBUS, name);
-  if (match)
-  {
-    DBusError error;
-    dbus_error_init (&error);
-    dbus_bus_remove_match (bus, match, &error);
     g_free (match);
     if (dbus_error_is_set (&error))
       {
@@ -333,31 +292,14 @@ void
 spi_dec_dbus_emit (SpiDEController *controller, const char *interface,
                    const char *name, const char *minor, int a1, int a2)
 {
-  DBusMessage *signal = NULL;
-  DBusMessageIter iter, iter_struct, iter_variant;
-  int nil = 0;
-  const char *path = SPI_DBUS_PATH_ROOT;
-  const char *bus_name = dbus_bus_get_unique_name (controller->bus);
-
-  signal = dbus_message_new_signal (path, interface, name);
-
-  dbus_message_iter_init_append (signal, &iter);
-
-  dbus_message_iter_append_basic (&iter, DBUS_TYPE_STRING, &minor);
-  dbus_message_iter_append_basic (&iter, DBUS_TYPE_INT32, &a1);
-  dbus_message_iter_append_basic (&iter, DBUS_TYPE_INT32, &a2);
-  dbus_message_iter_open_container (&iter, DBUS_TYPE_VARIANT, "i", &iter_variant);
-      dbus_message_iter_append_basic (&iter_variant, DBUS_TYPE_INT32, &nil);
-  dbus_message_iter_close_container (&iter, &iter_variant);
-
-  dbus_message_iter_open_container (&iter, DBUS_TYPE_STRUCT, NULL,
-                                    &iter_struct);
-  dbus_message_iter_append_basic (&iter_struct, DBUS_TYPE_STRING, &bus_name);
-  dbus_message_iter_append_basic (&iter_struct, DBUS_TYPE_OBJECT_PATH, &path);
-  dbus_message_iter_close_container (&iter, &iter_struct);
-
-  dbus_connection_send (controller->bus, signal, NULL);
-  dbus_message_unref (signal);
+  g_dbus_connection_emit_signal (controller->bus, NULL, SPI_DBUS_PATH_ROOT,
+                                 interface, name,
+                                 g_variant_new ("(siiv(so))",
+                                                minor, a1, a2,
+                                                g_variant_new_int32 (0),
+                                                g_dbus_connection_get_unique_name (controller->bus),
+                                                SPI_DBUS_PATH_ROOT),
+                                 NULL);
 }
 
 static gboolean
@@ -436,12 +378,27 @@ spi_dec_translate_mask (Accessibility_ControllerEventMask mask)
   return tmp_mask;
 }
 
+static A11yAtspiDeviceEventListener *
+get_listener_proxy (DEControllerListener *listener, SpiDEController *controller)
+{
+  if (!listener->proxy)
+    {
+      listener->proxy = G_DBUS_PROXY (a11y_atspi_device_event_listener_proxy_new_sync
+                                      (controller->bus,
+                                       G_DBUS_PROXY_FLAGS_DO_NOT_LOAD_PROPERTIES,
+                                       listener->bus_name, listener->path, NULL, NULL));
+      g_dbus_proxy_set_default_timeout (listener->proxy, 3000);
+    }
+
+  return A11Y_ATSPI_DEVICE_EVENT_LISTENER (listener->proxy);
+}
+
 static DEControllerKeyListener *
 spi_dec_key_listener_new (const char *bus_name,
 			  const char *path,
 			  GSList *keys,
 			  const Accessibility_ControllerEventMask mask,
-			  const dbus_uint32_t types,
+			  const guint32 types,
 			  const Accessibility_EventListenerMode  *mode)
 {
   DEControllerKeyListener *key_listener = g_new0 (DEControllerKeyListener, 1);
@@ -473,25 +430,14 @@ spi_dec_key_listener_new (const char *bus_name,
 static DEControllerListener *
 spi_dec_listener_new (const char *bus_name,
 		      const char *path,
-		      dbus_uint32_t types)
+		      guint32 types)
 {
   DEControllerListener *listener = g_new0 (DEControllerListener, 1);
   listener->bus_name = g_strdup(bus_name);
   listener->path = g_strdup(path);
   listener->type = SPI_DEVICE_TYPE_MOUSE;
   listener->types = types;
-  return listener;	
-}
-
-static DEControllerListener *
-spi_listener_clone (DEControllerListener *listener)
-{
-  DEControllerListener *clone = g_new0 (DEControllerListener, 1);
-  clone->bus_name = g_strdup (listener->bus_name);
-  clone->path = g_strdup (listener->path);
-  clone->type = listener->type;
-  clone->types = listener->types;
-  return clone;
+  return listener;
 }
 
 static GSList *keylist_clone (GSList *s)
@@ -514,26 +460,6 @@ static GSList *keylist_clone (GSList *s)
   return d;
 }
 
-static DEControllerKeyListener *
-spi_key_listener_clone (DEControllerKeyListener *key_listener)
-{
-  DEControllerKeyListener *clone = g_new0 (DEControllerKeyListener, 1);
-  clone->listener.bus_name = g_strdup (key_listener->listener.bus_name);
-  clone->listener.path = g_strdup (key_listener->listener.path);
-  clone->listener.type = SPI_DEVICE_TYPE_KBD;
-  clone->keys = keylist_clone (key_listener->keys);
-  clone->mask = key_listener->mask;
-  clone->listener.types = key_listener->listener.types;
-  if (key_listener->mode)
-  {
-    clone->mode = (Accessibility_EventListenerMode *)g_malloc(sizeof(Accessibility_EventListenerMode));
-    if (clone->mode) memcpy(clone->mode, key_listener->mode, sizeof(Accessibility_EventListenerMode));
-  }
-  else
-    clone->mode = NULL;
-  return clone;
-}
-
 static void keylist_free(GSList *keys)
 {
   GSList *l;
@@ -552,23 +478,7 @@ spi_key_listener_data_free (DEControllerKeyListener *key_listener)
 {
   keylist_free(key_listener->keys);
   if (key_listener->mode) g_free(key_listener->mode);
-  g_free (key_listener->listener.bus_name);
-  g_free (key_listener->listener.path);
   g_free (key_listener);
-}
-
-static void
-spi_key_listener_clone_free (DEControllerKeyListener *clone)
-{
-  spi_key_listener_data_free (clone);
-}
-
-static void
-spi_listener_clone_free (DEControllerListener *clone)
-{
-  g_free (clone->path);
-  g_free (clone->bus_name);
-  g_free (clone);
 }
 
 static void
@@ -580,6 +490,7 @@ spi_dec_listener_free (DEControllerListener    *listener)
   {
     g_free (listener->bus_name);
     g_free (listener->path);
+    g_clear_object (&listener->proxy);
   }
 }
 
@@ -680,133 +591,32 @@ spi_controller_deregister_global_keygrabs (SpiDEController         *controller,
   spi_controller_update_key_grabs (controller, NULL);
 }
 
-static void
-append_keystroke_listener (DBusMessageIter *iter, DEControllerKeyListener *listener)
+static GVariant *
+append_keystroke_listener (DEControllerKeyListener *listener)
 {
-  dbus_uint32_t d_uint;
-  DBusMessageIter iter_struct, iter_subarray, iter_substruct;
+  GVariantBuilder builder;
   GSList *kl;
 
-  if (!dbus_message_iter_open_container (iter, DBUS_TYPE_STRUCT, NULL,
-                                         &iter_struct))
-    return;
-
-  dbus_message_iter_append_basic (&iter_struct, DBUS_TYPE_STRING,
-                                  &listener->listener.bus_name);
-  dbus_message_iter_append_basic (&iter_struct, DBUS_TYPE_OBJECT_PATH,
-                                  &listener->listener.path);
-  d_uint = listener->listener.type;
-  dbus_message_iter_append_basic (&iter_struct, DBUS_TYPE_UINT32, &d_uint);
-  d_uint = listener->listener.types;
-  dbus_message_iter_append_basic (&iter_struct, DBUS_TYPE_UINT32, &d_uint);
-  if (!dbus_message_iter_open_container (&iter_struct, DBUS_TYPE_ARRAY,
-                                         "(iisi)", &iter_subarray))
-  {
-    dbus_message_iter_close_container (iter, &iter_struct);
-    return;
-  }
+  g_variant_builder_init (&builder, G_VARIANT_TYPE ("a(iisi)"));
   for (kl = listener->keys; kl; kl = kl->next)
-  {
-    Accessibility_KeyDefinition *kd = kl->data;
-    if (!dbus_message_iter_open_container (&iter_subarray, DBUS_TYPE_STRUCT,
-                                         NULL, &iter_substruct))
-      break;
-    dbus_message_iter_append_basic (&iter_substruct, DBUS_TYPE_INT32, &kd->keycode);
-    dbus_message_iter_append_basic (&iter_substruct, DBUS_TYPE_INT32, &kd->keysym);
-    dbus_message_iter_append_basic (&iter_substruct, DBUS_TYPE_STRING, &kd->keystring);
-    dbus_message_iter_append_basic (&iter_substruct, DBUS_TYPE_INT32, &kd->unused);
-    dbus_message_iter_close_container (&iter_subarray, &iter_substruct);
-  }
-  dbus_message_iter_close_container (&iter_struct, &iter_subarray);
-  d_uint = listener->mask;
-  dbus_message_iter_append_basic (&iter_struct, DBUS_TYPE_UINT32, &d_uint);
-  if (dbus_message_iter_open_container (&iter_struct, DBUS_TYPE_STRUCT,
-                                         NULL, &iter_substruct))
-  {
-    if (listener->mode)
     {
-      dbus_message_iter_append_basic (&iter_substruct, DBUS_TYPE_BOOLEAN,
-                                      &listener->mode->synchronous);
-      dbus_message_iter_append_basic (&iter_substruct, DBUS_TYPE_BOOLEAN,
-                                      &listener->mode->preemptive);
-      dbus_message_iter_append_basic (&iter_substruct, DBUS_TYPE_BOOLEAN,
-                                      &listener->mode->global);
+      Accessibility_KeyDefinition *kd = kl->data;
+      g_variant_builder_add (&builder, "(iisi)", kd->keycode, kd->keysym,
+                             kd->keystring, kd->unused);
     }
-    else
-    {
-      dbus_bool_t dummy_val = FALSE;
-      dbus_message_iter_append_basic (&iter_substruct, DBUS_TYPE_BOOLEAN,
-                                      &dummy_val);
-      dbus_message_iter_append_basic (&iter_substruct, DBUS_TYPE_BOOLEAN,
-                                      &dummy_val);
-      dbus_message_iter_append_basic (&iter_substruct, DBUS_TYPE_BOOLEAN,
-                                      &dummy_val);
-    }
-    dbus_message_iter_close_container (&iter_struct, &iter_substruct);
-  }
-  dbus_message_iter_close_container (iter, &iter_struct);
+
+  return g_variant_new ("(souu@a(iisi)u(bbb))",
+                        listener->listener.bus_name, listener->listener.path,
+                        listener->listener.type, listener->listener.types,
+                        g_variant_builder_end (&builder), listener->mask,
+                        FALSE, FALSE, FALSE);
 }
 
-static void
-notify_keystroke_listener (SpiDEController *controller,
-                           DEControllerKeyListener *listener,
-                           gboolean enable)
+static GVariant *
+append_mouse_listener (DEControllerListener *listener)
 {
-  const char *path = SPI_DBUS_PATH_DEC;
-  const char *interface = SPI_DBUS_INTERFACE_DEVICE_EVENT_LISTENER;
-  const char *name = (enable
-                      ? "KeystrokeListenerRegistered"
-                      : "KeystrokeListenerDeregistered");
-  DBusMessage *signal;
-  DBusMessageIter iter;
-
-  signal = dbus_message_new_signal (path, interface, name);
-  if (!signal)
-    return;
-  dbus_message_iter_init_append (signal, &iter);
-  append_keystroke_listener (&iter, listener);
-  dbus_connection_send (controller->bus, signal, NULL);
-  dbus_message_unref (signal);
-}
-
-static void
-append_mouse_listener (DBusMessageIter *iter, DEControllerListener *listener)
-{
-  DBusMessageIter iter_struct;
-  dbus_uint32_t d_uint;
-
-  if (!dbus_message_iter_open_container (iter, DBUS_TYPE_STRUCT, NULL,
-                                         &iter_struct))
-    return;
-  dbus_message_iter_append_basic (&iter_struct, DBUS_TYPE_STRING,
-                                  &listener->bus_name);
-  dbus_message_iter_append_basic (&iter_struct, DBUS_TYPE_OBJECT_PATH,
-                                  &listener->path);
-  d_uint = listener->types;
-  dbus_message_iter_append_basic (&iter_struct, DBUS_TYPE_UINT32, &d_uint);
-  dbus_message_iter_close_container (iter, &iter_struct);
-}
-
-static void
-notify_mouse_listener (SpiDEController *controller,
-                       DEControllerListener *listener,
-                       gboolean enable)
-{
-  const char *path = SPI_DBUS_PATH_DEC;
-  const char *interface = SPI_DBUS_INTERFACE_DEVICE_EVENT_LISTENER;
-  const char *name = (enable
-                      ? "DeviceListenerRegistered"
-                      : "DeviceListenerDeregistered");
-  DBusMessage *signal;
-  DBusMessageIter iter;
-
-  signal = dbus_message_new_signal (path, interface, name);
-  if (!signal)
-    return;
-  dbus_message_iter_init_append (signal, &iter);
-  append_mouse_listener (&iter, listener);
-  dbus_connection_send (controller->bus, signal, NULL);
-  dbus_message_unref (signal);
+  return g_variant_new ("(sou)",
+                        listener->bus_name, listener->path, listener->types);
 }
 
 static gboolean
@@ -822,7 +632,6 @@ spi_controller_register_device_listener (SpiDEController      *controller,
 
       controller->key_listeners = g_list_prepend (controller->key_listeners,
 						  key_listener);
-      spi_dbus_add_disconnect_match (controller->bus, key_listener->listener.bus_name);
       if (key_listener->mode->global)
         {
 	  retval = spi_controller_register_global_keygrabs (controller, key_listener);
@@ -830,7 +639,9 @@ spi_controller_register_device_listener (SpiDEController      *controller,
       else
 	  retval = TRUE;
       if (retval)
-	notify_keystroke_listener (controller, key_listener, TRUE);
+        a11y_atspi_device_event_listener_emit_keystroke_listener_registered
+          (get_listener_proxy (listener, controller),
+           append_keystroke_listener (key_listener));
       break;
   case SPI_DEVICE_TYPE_MOUSE:
       controller->mouse_listeners = g_list_prepend (controller->mouse_listeners, listener);
@@ -843,8 +654,9 @@ spi_controller_register_device_listener (SpiDEController      *controller,
             g_source_set_name_by_id (id, "[at-spi2-core] spi_dec_poll_mouse_idle");
           }
         }
-      spi_dbus_add_disconnect_match (controller->bus, listener->bus_name);
-      notify_mouse_listener (controller, listener, TRUE);
+      a11y_atspi_device_event_listener_emit_device_listener_registered
+        (get_listener_proxy (listener, controller),
+         append_mouse_listener (listener));
       break;
   default:
       break;
@@ -949,84 +761,34 @@ send_and_allow_reentry (DBusConnection *bus, DBusMessage *message, int timeout, 
         for (l = hung_processes; l; l = l->next)
           if (!strcmp (l->data, dest))
             return NULL;
-        hung_processes = g_slist_prepend (hung_processes, g_strdup (dest));
+        hung_pr ocesses = g_slist_prepend (hung_processes, g_strdup (dest));
         return NULL;
       }
     }
     dbus_pending_call_unref (pending);
     return reply;
 }
-static gboolean
-Accessibility_DeviceEventListener_NotifyEvent(SpiDEController *controller,
-                                              SpiRegistry *registry,
-                                              DEControllerListener *listener,
-                                              const Accessibility_DeviceEvent *key_event)
-{
-  DBusMessage *message = dbus_message_new_method_call(listener->bus_name,
-                                                      listener->path,
-                                                      SPI_DBUS_INTERFACE_DEVICE_EVENT_LISTENER,
-                                                      "NotifyEvent");
-  dbus_bool_t consumed = FALSE;
-  GSList *l;
-  gboolean hung = FALSE;
-
-  for (l = hung_processes; l; l = l->next)
-  {
-    if (!strcmp (l->data, listener->bus_name))
-    {
-      dbus_message_set_no_reply (message, TRUE);
-      hung = TRUE;
-      break;
-    }
-  }
-
-  if (spi_dbus_marshal_deviceEvent(message, key_event))
-  {
-    DBusMessage *reply;
-
-    if (hung)
-    {
-      dbus_connection_send (controller->bus, message, NULL);
-      dbus_message_unref (message);
-      return FALSE;
-    }
-
-    reply = send_and_allow_reentry (controller->bus, message, 3000, NULL);
-    if (reply)
-    {
-      dbus_message_get_args(reply, NULL, DBUS_TYPE_BOOLEAN, &consumed, DBUS_TYPE_INVALID);
-      dbus_message_unref(reply);
-    }
-  }
-  dbus_message_unref(message);
-  return consumed;
-}
 
 gboolean
 spi_controller_notify_mouselisteners (SpiDEController                 *controller,
 				      const Accessibility_DeviceEvent *event)
 {
-  GList   *l;
-  GSList  *notify = NULL, *l2;
-  GList  **listeners = &controller->mouse_listeners;
+  GList   *l, *notify = NULL;
   gboolean is_consumed;
 #ifdef SPI_KEYEVENT_DEBUG
   gboolean found = FALSE;
 #endif
-  if (!listeners)
-    {
-      return FALSE;
-    }
+  if (!controller->mouse_listeners)
+    return FALSE;
 
-  for (l = *listeners; l; l = l->next)
+  for (l = controller->mouse_listeners; l; l = l->next)
     {
        DEControllerListener *listener = l->data;
 
        if (eventtype_seq_contains_event (listener->types, event))
          {
 	   /* we clone (don't dup) the listener, to avoid refcount inc. */
-	   notify = g_slist_prepend (notify,
-				     spi_listener_clone (listener));
+	   notify = g_list_prepend (notify, listener);
 #ifdef SPI_KEYEVENT_DEBUG
            found = TRUE;
 #endif
@@ -1041,23 +803,15 @@ spi_controller_notify_mouselisteners (SpiDEController                 *controlle
 #endif
 
   is_consumed = FALSE;
-  for (l2 = notify; l2 && !is_consumed; l2 = l2->next)
+  for (l = notify; l && !is_consumed; l = l->next)
     {
-      DEControllerListener *listener = l2->data;
-
-      is_consumed = Accessibility_DeviceEventListener_NotifyEvent (controller, controller->registry, listener, event);
-
-      spi_listener_clone_free ((DEControllerListener *) l2->data);
+      DEControllerListener *listener = l->data;
+      a11y_atspi_device_event_listener_call_notify_event_sync (get_listener_proxy (listener, controller),
+                                                               spi_dbus_marshal_deviceEvent (event),
+                                                               &is_consumed, NULL, NULL);
     }
 
-  for (; l2; l2 = l2->next)
-    {
-      DEControllerListener *listener = l2->data;
-      spi_listener_clone_free (listener);
-      /* clone doesn't have its own ref, so don't use spi_device_listener_free */
-    }
-
-  g_slist_free (notify);
+  g_list_free (notify);
 
 #ifdef SPI_DEBUG
   if (is_consumed) g_message ("consumed\n");
@@ -1151,63 +905,144 @@ spi_key_event_matches_listener (const Accessibility_DeviceEvent *key_event,
     }
 }
 
-gboolean
-spi_controller_notify_keylisteners (SpiDEController                 *controller,
-				    Accessibility_DeviceEvent       *key_event,
-				    dbus_bool_t                    is_system_global)
+static GList *
+spi_controller_get_keylisteners_notify_list (SpiDEController           *controller,
+                                             Accessibility_DeviceEvent *key_event,
+                                             gboolean                   is_system_global)
 {
-  GList   *l;
-  GSList  *notify = NULL, *l2;
-  GList  **key_listeners = &controller->key_listeners;
-  gboolean is_consumed;
+  GList *l, *notify = NULL;
 
-  if (!key_listeners)
-    {
-      return FALSE;
-    }
+  if (!controller->key_listeners)
+    return NULL;
 
   /* set the NUMLOCK event mask bit if appropriate: see bug #143702 */
   if (key_event->modifiers & _numlock_physical_mask)
       key_event->modifiers |= SPI_KEYMASK_NUMLOCK;
 
-  for (l = *key_listeners; l; l = l->next)
+  for (l = controller->key_listeners; l; l = l->next)
     {
        DEControllerKeyListener *key_listener = l->data;
 
        if (spi_key_event_matches_listener (key_event, key_listener, is_system_global))
-         {
-	   /* we clone (don't dup) the listener, to avoid refcount inc. */
-	   notify = g_slist_prepend (notify,
-				     spi_key_listener_clone (key_listener));
-         }
+         notify = g_list_prepend (notify, key_listener);
     }
 
 #ifdef SPI_KEYEVENT_DEBUG
   if (!notify)
-    {
-      g_print ("no match for event\n");
-    }
+    g_print ("no match for event\n");
 #endif
 
+  return notify;
+}
+
+typedef struct {
+  GList *notify;
+  GList *current;
+  GVariant *event;
+} NotifyKeyListenersData;
+
+static void
+notify_keylisteners_data_free (gpointer _data)
+{
+  NotifyKeyListenersData *data = _data;
+  g_clear_pointer (&data->event, g_variant_unref);
+  g_list_free (data->notify);
+  g_free (data);
+}
+
+static void
+notify_event_done (GObject *proxy,
+                   GAsyncResult *res,
+                   gpointer user_data)
+{
+  GTask *task = user_data;
+  NotifyKeyListenersData *data = g_task_get_task_data (task);
+  DEControllerKeyListener *key_listener = data->current->data;
+  gboolean is_consumed = FALSE;
+
+  a11y_atspi_device_event_listener_call_notify_event_finish
+    (A11Y_ATSPI_DEVICE_EVENT_LISTENER (proxy), &is_consumed, res, NULL);
+  is_consumed &= key_listener->mode->preemptive;
+
+  if (is_consumed)
+    {
+      g_task_return_boolean (task, TRUE);
+      g_object_unref (task);
+      return;
+    }
+
+  data->current = data->current->next;
+  if (!data->current)
+    {
+      g_task_return_boolean (task, FALSE);
+      g_object_unref (task);
+      return;
+    }
+
+  a11y_atspi_device_event_listener_call_notify_event
+    (get_listener_proxy (data->current->data, g_task_get_source_object (task)),
+     data->event, NULL, notify_event_done, task);
+}
+
+static void
+spi_controller_begin_notify_keylisteners (SpiDEController     *controller,
+                                          GVariant            *event,
+                                          GAsyncReadyCallback  callback,
+                                          gpointer             user_data)
+{
+  NotifyKeyListenersData *data = g_new0 (NotifyKeyListenersData, 1);
+  Accessibility_DeviceEvent key_event;
+  GTask *task;
+  GList *notify = NULL;
+
+  spi_dbus_demarshal_deviceEvent (event, &key_event);
+  notify = spi_controller_get_keylisteners_notify_list (controller, &key_event, FALSE);
+
+  task = g_task_new (controller, NULL, callback, user_data);
+  data->event = g_variant_ref (event);
+  data->current = data->notify = notify;
+  g_task_set_task_data (task, data, notify_keylisteners_data_free);
+
+  if (notify)
+    {
+      DEControllerKeyListener *key_listener = notify->data;
+      a11y_atspi_device_event_listener_call_notify_event
+        (get_listener_proxy ((DEControllerListener *) key_listener, controller),
+         data->event, NULL, notify_event_done, g_object_ref (task));
+    }
+  else
+    {
+#ifdef SPI_KEYEVENT_DEBUG
+      g_print ("no match for event\n");
+#endif
+      g_task_return_boolean (task, FALSE);
+    }
+
+  g_object_unref (task);
+  g_free (key_event.event_string);
+}
+
+gboolean
+spi_controller_notify_keylisteners (SpiDEController                 *controller,
+				    Accessibility_DeviceEvent       *key_event,
+				    gboolean                    is_system_global)
+{
+  gboolean is_consumed;
+  GList *l, *notify = NULL;
+
+  notify = spi_controller_get_keylisteners_notify_list (controller, key_event, is_system_global);
   is_consumed = FALSE;
-  for (l2 = notify; l2 && !is_consumed; l2 = l2->next)
+
+  for (l = notify; l && !is_consumed; l = l->next)
     {
-      DEControllerKeyListener *key_listener = l2->data;	    
-
-      is_consumed = Accessibility_DeviceEventListener_NotifyEvent (controller, controller->registry, &key_listener->listener, key_event) &&
-	            key_listener->mode->preemptive;
-
-      spi_key_listener_clone_free (key_listener);
+      DEControllerKeyListener *key_listener = l->data;
+      a11y_atspi_device_event_listener_call_notify_event_sync (get_listener_proxy ((DEControllerListener *) key_listener, controller),
+                                                               spi_dbus_marshal_deviceEvent (key_event),
+                                                               &is_consumed, NULL, NULL);
+      is_consumed &= key_listener->mode->preemptive;
     }
 
-  for (; l2; l2 = l2->next)
-    {
-      DEControllerKeyListener *key_listener = l2->data;	    
-      spi_key_listener_clone_free (key_listener);
-      /* clone doesn't have its own ref, so don't use spi_dec_listener_free */
-    }
-
-  g_slist_free (notify);
+  g_list_free (notify);
 
 #ifdef SPI_DEBUG
   if (is_consumed) g_message ("consumed\n");
@@ -1322,6 +1157,7 @@ static void
 spi_device_event_controller_object_finalize (GObject *object)
 {
   SpiDEController *controller = SPI_DEVICE_EVENT_CONTROLLER (object);
+  SpiDEControllerPrivate *priv = spi_device_event_controller_get_instance_private (controller);
   SpiDEControllerClass *klass;
 
   klass = SPI_DEVICE_EVENT_CONTROLLER_GET_CLASS (controller);
@@ -1331,6 +1167,10 @@ spi_device_event_controller_object_finalize (GObject *object)
   if (klass->plat.finalize)
     klass->plat.finalize (controller);
 
+  g_clear_object (&priv->dec_skel);
+
+  g_dbus_connection_remove_filter (controller->bus, priv->bus_filter_id);
+
   G_OBJECT_CLASS (spi_device_event_controller_parent_class)->finalize (object);
 }
 
@@ -1338,255 +1178,230 @@ spi_device_event_controller_object_finalize (GObject *object)
  * DBus Accessibility::DEController::RegisterKeystrokeListener
  *     method implementation
  */
-static DBusMessage *
-impl_register_keystroke_listener (DBusConnection *bus,
-				  DBusMessage *message,
-				  void *user_data)
+static gboolean
+handle_register_keystroke_listener (A11yAtspiDeviceEventController *skel,
+                                    GDBusMethodInvocation *invocation,
+                                    const gchar *listener,
+                                    GVariant *keys_variant,
+                                    guint mask,
+                                    guint type,
+                                    GVariant *mode_variant,
+                                    gpointer user_data)
 {
-  SpiDEController *controller = SPI_DEVICE_EVENT_CONTROLLER(user_data);
-  DEControllerKeyListener *dec_listener;
-  DBusMessageIter iter, iter_array;
-  const char *path;
+  SpiDEController *controller = user_data;
   GSList *keys = NULL;
-  dbus_int32_t mask, type;
-  Accessibility_EventListenerMode *mode;
- dbus_bool_t ret;
-  DBusMessage *reply = NULL;
-  char *keystring;
+  GVariant *value;
+  GVariantIter iter;
+  DEControllerKeyListener *dec_listener;
+  Accessibility_EventListenerMode mode;
+  gboolean ret;
 
-  if (strcmp (dbus_message_get_signature (message), "oa(iisi)uu(bbb)") != 0)
-    return invalid_arguments_error (message);
-
-  dbus_message_iter_init(message, &iter);
-  dbus_message_iter_get_basic(&iter, &path);
-  dbus_message_iter_next(&iter);
-  dbus_message_iter_recurse(&iter, &iter_array);
-  while (dbus_message_iter_get_arg_type(&iter_array) != DBUS_TYPE_INVALID)
-  {
-    Accessibility_KeyDefinition *kd = (Accessibility_KeyDefinition *)g_malloc(sizeof(Accessibility_KeyDefinition));
-    if (!spi_dbus_message_iter_get_struct(&iter_array, DBUS_TYPE_INT32, &kd->keycode, DBUS_TYPE_INT32, &kd->keysym, DBUS_TYPE_STRING, &keystring, DBUS_TYPE_INVALID))
+  g_variant_iter_init (&iter, keys_variant);
+  while ((value = g_variant_iter_next_value (&iter)))
     {
-      break;
+      Accessibility_KeyDefinition *kd = g_new0 (Accessibility_KeyDefinition, 1);
+
+      g_variant_get (value, "(iisi)", &kd->keycode, &kd->keysym,
+                     &kd->keystring, NULL);
+      keys = g_slist_append (keys, kd);
+      g_variant_unref (value);
     }
-    kd->keystring = g_strdup (keystring);
-    keys = g_slist_append(keys, kd);
-  }
-  dbus_message_iter_next(&iter);
-  dbus_message_iter_get_basic(&iter, &mask);
-  dbus_message_iter_next(&iter);
-  dbus_message_iter_get_basic(&iter, &type);
-  dbus_message_iter_next(&iter);
-  mode = (Accessibility_EventListenerMode *)g_malloc(sizeof(Accessibility_EventListenerMode));
-  if (mode)
-  {
-    spi_dbus_message_iter_get_struct(&iter, DBUS_TYPE_BOOLEAN, &mode->synchronous, DBUS_TYPE_BOOLEAN, &mode->preemptive, DBUS_TYPE_BOOLEAN, &mode->global, DBUS_TYPE_INVALID);
-  }
+
+  g_variant_get (mode_variant, "(bbb)", &mode.synchronous, &mode.preemptive,
+                 &mode.global);
+
+  dec_listener = spi_dec_key_listener_new (g_dbus_method_invocation_get_sender (invocation),
+                                           listener, keys, mask, type, &mode);
+  ret = spi_controller_register_device_listener (controller, (DEControllerListener *) dec_listener);
+
+  a11y_atspi_device_event_controller_complete_register_keystroke_listener
+    (skel, invocation, ret);
+
 #ifdef SPI_DEBUG
   fprintf (stderr, "registering keystroke listener %s:%s with maskVal %lu\n",
-	   dbus_message_get_sender(message), path, (unsigned long) mask);
+	   g_dbus_method_invocation_get_sender (invocation), listener, (unsigned long) mask);
 #endif
-  dec_listener = spi_dec_key_listener_new (dbus_message_get_sender(message), path, keys, mask, type, mode);
-  g_free (mode);
-  ret = spi_controller_register_device_listener (
-	  controller, (DEControllerListener *) dec_listener);
-  reply = dbus_message_new_method_return (message);
-  if (reply)
-  {
-    dbus_message_append_args (reply, DBUS_TYPE_BOOLEAN, &ret, DBUS_TYPE_INVALID);
-  }
-  return reply;
+
+  return TRUE;
 }
 
 /*
  * DBus Accessibility::DEController::RegisterDeviceEventListener
  *     method implementation
  */
-static DBusMessage *
-impl_register_device_event_listener (DBusConnection *bus,
-				  DBusMessage *message,
-				  void *user_data)
+static gboolean
+handle_register_device_event_listener (A11yAtspiDeviceEventController *skel,
+                                       GDBusMethodInvocation *invocation,
+                                       const gchar *listener_path,
+                                       guint types,
+                                       gpointer user_data)
 {
-  SpiDEController *controller = SPI_DEVICE_EVENT_CONTROLLER(user_data);
+  SpiDEController *controller = user_data;
   DEControllerListener *dec_listener;
-  const char *path;
-  dbus_int32_t event_types;
-  dbus_bool_t ret;
-  DBusMessage *reply = NULL;
+  gboolean ret;
 
-  if (!dbus_message_get_args(message, NULL, DBUS_TYPE_OBJECT_PATH, &path, DBUS_TYPE_UINT32, &event_types, DBUS_TYPE_INVALID))
-  {
-    return invalid_arguments_error (message);
-  }
-  dec_listener = spi_dec_listener_new (dbus_message_get_sender(message), path, event_types);
-  ret =  spi_controller_register_device_listener (
-	  controller, (DEControllerListener *) dec_listener);
-  reply = dbus_message_new_method_return (message);
-  if (reply)
-  {
-    dbus_message_append_args (reply, DBUS_TYPE_BOOLEAN, &ret, DBUS_TYPE_INVALID);
-  }
-  return reply;
+  dec_listener = spi_dec_listener_new (g_dbus_method_invocation_get_sender (invocation),
+                                       listener_path, types);
+  ret = spi_controller_register_device_listener (controller, dec_listener);
+
+  a11y_atspi_device_event_controller_complete_register_device_event_listener
+    (skel, invocation, ret);
+  return TRUE;
 }
 
-typedef struct {
-	DBusConnection *bus;
-	DEControllerListener    *listener;
-} RemoveListenerClosure;
 
-static SpiReEntrantContinue
-remove_listener_cb (GList * const *list,
-		    gpointer       user_data)
+
+static GList *
+spi_controller_deregister_device_listener_link (SpiDEController *controller,
+                                                GList *link)
 {
-  DEControllerListener  *listener = (*list)->data;
-  RemoveListenerClosure *ctx = user_data;
+  DEControllerListener *mouse_listener = link->data;
+  GList *ret;
 
-  if (!strcmp(ctx->listener->bus_name, listener->bus_name) &&
-      !strcmp(ctx->listener->path, listener->path))
-    {
-      spi_re_entrant_list_delete_link (list);
-      spi_dbus_remove_disconnect_match (ctx->bus, listener->bus_name);
-      spi_dec_listener_free (listener);
-    }
+  a11y_atspi_device_event_listener_emit_device_listener_deregistered
+    (get_listener_proxy (mouse_listener, controller),
+     append_mouse_listener (mouse_listener));
 
-  return SPI_RE_ENTRANT_CONTINUE;
-}
+  ret = link->next;
+  controller->mouse_listeners = g_list_delete_link (controller->mouse_listeners, link);
+  if (!controller->mouse_listeners)
+    have_mouse_listener = FALSE;
 
-static SpiReEntrantContinue
-copy_key_listener_cb (GList * const *list,
-		      gpointer       user_data)
-{
-  DEControllerKeyListener  *key_listener = (*list)->data;
-  RemoveListenerClosure    *ctx = user_data;
-
-  if (!strcmp(ctx->listener->bus_name, key_listener->listener.bus_name) &&
-      !strcmp(ctx->listener->path, key_listener->listener.path))
-    {
-      /* TODO: FIXME aggregate keys in case the listener is registered twice */
-      DEControllerKeyListener *ctx_key_listener = 
-	(DEControllerKeyListener *) ctx->listener; 
-      keylist_free (ctx_key_listener->keys);	    
-      ctx_key_listener->keys = keylist_clone(key_listener->keys);
-    }
-
-  return SPI_RE_ENTRANT_CONTINUE;
+  return ret;
 }
 
 static void
-spi_controller_deregister_device_listener (SpiDEController            *controller,
-					   DEControllerListener *listener)
+spi_controller_deregister_device_listener (SpiDEController *controller,
+                                           DEControllerListener *listener)
 {
-  RemoveListenerClosure  ctx;
+  GList *l = controller->mouse_listeners;
 
-  ctx.bus = controller->bus;
-  ctx.listener = listener;
+  while (l != NULL)
+    {
+      DEControllerListener *mouse_listener = l->data;
+      if (!strcmp (listener->bus_name, mouse_listener->bus_name) &&
+          !strcmp (listener->path, mouse_listener->path))
+        l = spi_controller_deregister_device_listener_link (controller, l);
+      else
+        l = l->next;
+    }
+}
 
-  notify_mouse_listener (controller, listener, FALSE);
+static GList *
+spi_deregister_controller_key_listener_link (SpiDEController *controller,
+                                             GList *link)
+{
+  DEControllerKeyListener *key_listener = link->data;
+  GList *ret;
 
-  spi_re_entrant_list_foreach (&controller->mouse_listeners,
-			       remove_listener_cb, &ctx);
-  if (!controller->mouse_listeners)
-    have_mouse_listener = FALSE;
+  a11y_atspi_device_event_listener_emit_keystroke_listener_deregistered
+    (get_listener_proxy ((DEControllerListener *) key_listener, controller),
+     append_keystroke_listener (key_listener));
+
+  ret = link->next;
+  controller->key_listeners = g_list_delete_link (controller->key_listeners, link);
+
+  return ret;
 }
 
 static void
 spi_deregister_controller_key_listener (SpiDEController            *controller,
 					DEControllerKeyListener    *key_listener)
 {
-  RemoveListenerClosure  ctx;
+  GList *l;
 
-  ctx.bus = controller->bus;
-  ctx.listener = (DEControllerListener *) spi_key_listener_clone (key_listener);
-
-  notify_keystroke_listener (controller, key_listener, FALSE);
+  a11y_atspi_device_event_listener_emit_keystroke_listener_deregistered
+    (get_listener_proxy ((DEControllerListener *) key_listener, controller),
+     append_keystroke_listener (key_listener));
 
   /* special case, copy keyset from existing controller list entry */
   if (g_slist_length(key_listener->keys) == 0)
     {
-      spi_re_entrant_list_foreach (&controller->key_listeners,
-				  copy_key_listener_cb, &ctx);
+      for (l = controller->key_listeners; l != NULL; l = l->next)
+        {
+          DEControllerKeyListener *listener = l->data;
+          if (!strcmp (key_listener->listener.bus_name, listener->listener.bus_name) &&
+              !strcmp (key_listener->listener.path, listener->listener.path))
+            {
+              /* TODO: FIXME aggregate keys in case the listener is registered twice */
+              keylist_free (key_listener->keys);
+              key_listener->keys = keylist_clone (listener->keys);
+            }
+        }
     }
 
   spi_controller_deregister_global_keygrabs (controller, key_listener);
 
-  spi_re_entrant_list_foreach (&controller->key_listeners,
-				remove_listener_cb, &ctx);
-
-  spi_key_listener_clone_free ((DEControllerKeyListener *) ctx.listener);
+  l = controller->key_listeners;
+  while (l != NULL)
+    {
+      DEControllerKeyListener *listener = l->data;
+      if (!strcmp (key_listener->listener.bus_name, listener->listener.bus_name) &&
+          !strcmp (key_listener->listener.path, listener->listener.path))
+        l = spi_deregister_controller_key_listener_link (controller, l);
+      else
+        l = l->next;
+    }
 }
 
 void
 spi_remove_device_listeners (SpiDEController *controller, const char *bus_name)
 {
-  GList *l, *tmp;
+  GList *l;
 
-  for (l = controller->mouse_listeners; l; l = tmp)
-  {
-    DEControllerListener *listener = l->data;
-    tmp = l->next;
-    if (!strcmp (listener->bus_name, bus_name))
+  l = controller->mouse_listeners;
+  while (l != NULL)
     {
-      spi_controller_deregister_device_listener (controller, listener);
-      tmp = controller->mouse_listeners;
+      DEControllerListener *listener = l->data;
+      if (!strcmp (listener->bus_name, bus_name))
+        l = spi_controller_deregister_device_listener_link (controller, l);
+      else
+        l = l->next;
     }
-  }
-  for (l = controller->key_listeners; l; l = tmp)
-  {
-    DEControllerKeyListener *key_listener = l->data;
-    tmp = l->next;
-    if (!strcmp (key_listener->listener.bus_name, bus_name))
+
+  l = controller->key_listeners;
+  while (l != NULL)
     {
-      /* TODO: untangle the below line(s) */
-      spi_deregister_controller_key_listener (controller, key_listener);
-      tmp = controller->key_listeners;
+      DEControllerKeyListener *key_listener = l->data;
+      if (!strcmp (key_listener->listener.bus_name, bus_name))
+        l = spi_deregister_controller_key_listener_link (controller, l);
+      else
+        l = l->next;
     }
-  }
 }
 
 /*
  * DBus Accessibility::DEController::DeregisterKeystrokeListener
  *     method implementation
  */
-static DBusMessage *
-impl_deregister_keystroke_listener (DBusConnection *bus,
-				  DBusMessage *message,
-				  void *user_data)
+static gboolean
+handle_deregister_keystroke_listener (A11yAtspiDeviceEventController *skel,
+                                      GDBusMethodInvocation *invocation,
+                                      const gchar *listener,
+                                      GVariant *keys_variant,
+                                      guint mask,
+                                      guint type,
+                                      gpointer user_data)
 {
-  SpiDEController *controller = SPI_DEVICE_EVENT_CONTROLLER(user_data);
-  DEControllerKeyListener *key_listener;
-  DBusMessageIter iter, iter_array;
-  const char *path;
+  SpiDEController *controller = user_data;
   GSList *keys = NULL;
-  dbus_int32_t mask, type;
-  DBusMessage *reply = NULL;
+  GVariant *value;
+  GVariantIter iter;
+  DEControllerKeyListener *key_listener;
 
-  dbus_message_iter_init(message, &iter);
-  if (strcmp (dbus_message_get_signature (message), "oa(iisi)uu") != 0)
-  {
-    g_warning ("Received DeregisterKeystrokeListener with strange signature '%s'", dbus_message_get_signature (message));
-    return invalid_arguments_error (message);
-  }
-
-  dbus_message_iter_get_basic(&iter, &path);
-  dbus_message_iter_next(&iter);
-  dbus_message_iter_recurse(&iter, &iter_array);
-  while (dbus_message_iter_get_arg_type(&iter_array) != DBUS_TYPE_INVALID)
-  {
-    Accessibility_KeyDefinition *kd = (Accessibility_KeyDefinition *)g_malloc(sizeof(Accessibility_KeyDefinition));
-  char *keystring;
-
-    if (!spi_dbus_message_iter_get_struct(&iter_array, DBUS_TYPE_INT32, &kd->keycode, DBUS_TYPE_INT32, &kd->keysym, DBUS_TYPE_STRING, &keystring, DBUS_TYPE_INVALID))
+  g_variant_iter_init (&iter, keys_variant);
+  while ((value = g_variant_iter_next_value (&iter)))
     {
-      break;
+      Accessibility_KeyDefinition *kd = g_new0 (Accessibility_KeyDefinition, 1);
+
+      g_variant_get (value, "(iisi)", &kd->keycode, &kd->keysym,
+                     &kd->keystring, NULL);
+      keys = g_slist_append (keys, kd);
+      g_variant_unref (value);
     }
-    kd->keystring = g_strdup (keystring);
-    keys = g_slist_append(keys, kd);
-  }
-  dbus_message_iter_next(&iter);
-  dbus_message_iter_get_basic(&iter, &mask);
-  dbus_message_iter_next(&iter);
-  dbus_message_iter_get_basic(&iter, &type);
-  dbus_message_iter_next(&iter);
-  key_listener = spi_dec_key_listener_new (dbus_message_get_sender(message), path, keys, mask, type, NULL);
+
+  key_listener = spi_dec_key_listener_new (g_dbus_method_invocation_get_sender (invocation),
+                                           listener, keys, mask, type, NULL);
 #ifdef SPI_DEREGISTER_DEBUG
   fprintf (stderr, "deregistering keystroke listener %p with maskVal %lu\n",
 	   (void *) l, (unsigned long) mask->value);
@@ -1595,82 +1410,73 @@ impl_deregister_keystroke_listener (DBusConnection *bus,
   spi_deregister_controller_key_listener (controller, key_listener);
 
   spi_dec_listener_free ((DEControllerListener *) key_listener);
-  reply = dbus_message_new_method_return (message);
-  return reply;
+
+  a11y_atspi_device_event_controller_complete_deregister_keystroke_listener (skel, invocation);
+  return TRUE;
 }
 
 /*
  * DBus Accessibility::DEController::DeregisterDeviceEventListener
  *     method implementation
  */
-static DBusMessage *
-impl_deregister_device_event_listener (DBusConnection *bus,
-				  DBusMessage *message,
-				  void *user_data)
+static gboolean
+handle_deregister_device_event_listener (A11yAtspiDeviceEventController *skel,
+                                         GDBusMethodInvocation *invocation,
+                                         const gchar *listener_path,
+                                         guint types,
+                                         gpointer user_data)
 {
-  SpiDEController *controller = SPI_DEVICE_EVENT_CONTROLLER(user_data);
+  SpiDEController *controller = user_data;
   DEControllerListener *listener;
-  const char *path;
-  dbus_int32_t event_types;
-  DBusMessage *reply = NULL;
 
-  if (!dbus_message_get_args(message, NULL, DBUS_TYPE_OBJECT_PATH, &path, DBUS_TYPE_UINT32, &event_types, DBUS_TYPE_INVALID))
-  {
-    return invalid_arguments_error (message);
-  }
-  listener = spi_dec_listener_new (dbus_message_get_sender(message), path, event_types);
-  spi_controller_deregister_device_listener (
-	  controller, listener);
-  reply = dbus_message_new_method_return (message);
-  return reply;
+  listener = spi_dec_listener_new (g_dbus_method_invocation_get_sender (invocation),
+                                   listener_path, types);
+  spi_controller_deregister_device_listener (controller, listener);
+
+  a11y_atspi_device_event_controller_complete_deregister_device_event_listener (skel, invocation);
+  return TRUE;
 }
 
-static DBusMessage *
-impl_get_keystroke_listeners (DBusConnection *bus,
-				  DBusMessage *message,
-				  void *user_data)
+static gboolean
+handle_get_keystroke_listeners (A11yAtspiDeviceEventController *skel,
+                                GDBusMethodInvocation *invocation,
+                                gpointer user_data)
 {
-  SpiDEController *controller = SPI_DEVICE_EVENT_CONTROLLER(user_data);
-  DBusMessageIter iter, iter_array;
-  DBusMessage *reply = dbus_message_new_method_return (message);
+  SpiDEController *controller = user_data;
+  GVariantBuilder builder;
   GList *l;
 
-  if (!reply)
-    return NULL;
-
-  dbus_message_iter_init_append (reply, &iter);
-  dbus_message_iter_open_container (&iter, DBUS_TYPE_ARRAY,
-                                    "(souua(iisi)u(bbb))", &iter_array);
+  g_variant_builder_init (&builder, G_VARIANT_TYPE ("a(souua(iisi)u(bbb))"));
   for (l = controller->key_listeners; l; l = l->next)
-  {
-    append_keystroke_listener (&iter_array, l->data);
-  }
-  dbus_message_iter_close_container (&iter, &iter_array);
-  return reply;
+    {
+      GVariant *variant = append_keystroke_listener (l->data);
+      g_variant_builder_add_value (&builder, variant);
+    }
+
+  a11y_atspi_device_event_controller_complete_get_keystroke_listeners
+    (skel, invocation, g_variant_builder_end (&builder));
+  return TRUE;
 }
 
-static DBusMessage *
-impl_get_device_event_listeners (DBusConnection *bus,
-				  DBusMessage *message,
-				  void *user_data)
+static gboolean
+handle_get_device_event_listeners (A11yAtspiDeviceEventController *skel,
+                                   GDBusMethodInvocation *invocation,
+                                   gpointer user_data)
 {
-  SpiDEController *controller = SPI_DEVICE_EVENT_CONTROLLER(user_data);
-  DBusMessageIter iter, iter_array;
+  SpiDEController *controller = user_data;
+  GVariantBuilder builder;
   GList *l;
-  DBusMessage *reply = dbus_message_new_method_return (message);
 
-  if (!reply)
-    return NULL;
-
-  dbus_message_iter_init_append (reply, &iter);
-  dbus_message_iter_open_container (&iter, DBUS_TYPE_ARRAY,
-                                    "(sou)", &iter_array);
+  g_variant_builder_init (&builder, G_VARIANT_TYPE ("a(sou)"));
   for (l = controller->key_listeners; l; l = l->next)
-  {
-    append_mouse_listener (&iter_array, l->data);
-  }
-  dbus_message_iter_close_container (&iter, &iter_array);
-  return reply;
+    {
+      GVariant *variant = append_mouse_listener (l->data);
+      g_variant_builder_add_value (&builder, variant);
+    }
+
+  a11y_atspi_device_event_controller_complete_get_device_event_listeners
+    (skel, invocation, g_variant_builder_end (&builder));
+  return TRUE;
 }
 
 static unsigned
@@ -1712,23 +1518,19 @@ spi_dec_synth_keysym (SpiDEController *controller, long keysym)
  * DBus Accessibility::DEController::RegisterKeystrokeListener
  *     method implementation
  */
-static DBusMessage *
-impl_generate_keyboard_event (DBusConnection *bus, DBusMessage *message, void *user_data)
+static gboolean
+handle_generate_keyboard_event (A11yAtspiDeviceEventController *skel,
+                                GDBusMethodInvocation *invocation,
+                                gint keycode,
+                                const char *keystring,
+                                guint type,
+                                gpointer user_data)
 {
-  SpiDEController *controller = SPI_DEVICE_EVENT_CONTROLLER(user_data);
-  dbus_int32_t keycode;
-  char *keystring;
-  dbus_uint32_t synth_type;
-  DBusMessage *reply = NULL;
-
-  if (!dbus_message_get_args(message, NULL, DBUS_TYPE_INT32, &keycode, DBUS_TYPE_STRING, &keystring, DBUS_TYPE_UINT32, &synth_type, DBUS_TYPE_INVALID))
-  {
-    return invalid_arguments_error (message);
-  }
+  SpiDEController *controller = user_data;
 
 #ifdef SPI_DEBUG
 	fprintf (stderr, "synthesizing keystroke %ld, type %d\n",
-		 (long) keycode, (int) synth_type);
+		 (long) keycode, (int) type);
 #endif
   /* TODO: hide/wrap/remove X dependency */
 
@@ -1737,7 +1539,7 @@ impl_generate_keyboard_event (DBusConnection *bus, DBusMessage *message, void *u
    * and fall back to XSendEvent() if XTest is not available.
    */
   
-  switch (synth_type)
+  switch (type)
     {
       case Accessibility_KEY_PRESS:
 	      spi_dec_plat_synth_keycode_press (controller, keycode);
@@ -1759,86 +1561,95 @@ impl_generate_keyboard_event (DBusConnection *bus, DBusMessage *message, void *u
 	      spi_dec_synth_keysym (controller, keycode);
 	      break;
       case Accessibility_KEY_STRING:
-	      if (!spi_dec_plat_synth_keystring (controller, synth_type, keycode, keystring))
+	      if (!spi_dec_plat_synth_keystring (controller, type, keycode, keystring))
 		      fprintf (stderr, "Keystring synthesis failure, string=%s\n",
 			       keystring);
 	      break;
     }
-  reply = dbus_message_new_method_return (message);
-  return reply;
+
+  a11y_atspi_device_event_controller_complete_generate_keyboard_event (skel, invocation);
+  return TRUE;
 }
 
 /* Accessibility::DEController::GenerateMouseEvent */
-static DBusMessage *
-impl_generate_mouse_event (DBusConnection *bus, DBusMessage *message, void *user_data)
+static gboolean
+handle_generate_mouse_event (A11yAtspiDeviceEventController *skel,
+                             GDBusMethodInvocation *invocation,
+                             gint x,
+                             gint y,
+                             const char *event_name,
+                             gpointer user_data)
 {
-  dbus_int32_t       x;
-  dbus_int32_t       y;
-  char *eventName;
-  DBusMessage *reply = NULL;
-
-  if (!dbus_message_get_args(message, NULL, DBUS_TYPE_INT32, &x, DBUS_TYPE_INT32, &y, DBUS_TYPE_STRING, &eventName, DBUS_TYPE_INVALID))
-  {
-    return invalid_arguments_error (message);
-  }
+  SpiDEController *dec = user_data;
 
 #ifdef SPI_DEBUG
   fprintf (stderr, "generating mouse %s event at %ld, %ld\n",
-	   eventName, (long int) x, (long int) y);
+	   event_name, (long int) x, (long int) y);
 #endif
-  spi_dec_plat_generate_mouse_event (saved_controller, x, y, eventName);
-  reply = dbus_message_new_method_return (message);
-  return reply;
+
+  spi_dec_plat_generate_mouse_event (dec, x, y, event_name);
+  a11y_atspi_device_event_controller_complete_generate_mouse_event (skel, invocation);
+  return TRUE;
+}
+
+static void
+notify_keylisteners_done (GObject *source,
+                          GAsyncResult *res,
+                          gpointer user_data)
+{
+  GDBusMethodInvocation *invocation = user_data;
+  SpiDEController *controller = SPI_DEVICE_EVENT_CONTROLLER (source);
+  SpiDEControllerPrivate *priv = spi_device_event_controller_get_instance_private (controller);
+  gboolean is_consumed;
+
+  is_consumed = g_task_propagate_boolean (G_TASK (res), NULL);
+#ifdef SPI_DEBUG
+  g_print ("consumed %d\n", is_consumed);
+#endif
+  if (invocation)
+    a11y_atspi_device_event_controller_complete_notify_listeners_sync
+      (priv->dec_skel, invocation, is_consumed);
 }
 
 /* Accessibility::DEController::NotifyListenersSync */
-static DBusMessage *
-impl_notify_listeners_sync (DBusConnection *bus, DBusMessage *message, void *user_data)
+static gboolean
+handle_notify_listeners_sync (A11yAtspiDeviceEventController *skel,
+                              GDBusMethodInvocation *invocation,
+                              GVariant *variant,
+                              gpointer user_data)
 {
-  SpiDEController *controller = SPI_DEVICE_EVENT_CONTROLLER(user_data);
-  Accessibility_DeviceEvent event;
-  dbus_bool_t ret;
-  DBusMessage *reply = NULL;
+  SpiDEController *controller = user_data;
 
-  if (!spi_dbus_demarshal_deviceEvent(message, &event))
-  {
-    return invalid_arguments_error (message);
-  }
 #ifdef SPI_DEBUG
-  g_print ("notifylistening listeners synchronously: controller %p, event id %d\n",
-	   controller, (int) event.id);
+  char *str = g_variant_print (variant, TRUE);
+  g_print ("notifylistening listeners synchronously: controller %p, event %s\n",
+	   controller, str);
+  g_free (str);
 #endif
-  ret = spi_controller_notify_keylisteners (controller,
-					     (Accessibility_DeviceEvent *) 
-					     &event, FALSE) ?
-	  TRUE : FALSE; 
-  reply = dbus_message_new_method_return (message);
-  if (reply)
-  {
-    dbus_message_append_args (reply, DBUS_TYPE_BOOLEAN, &ret, DBUS_TYPE_INVALID);
-  }
-  return reply;
+  spi_controller_begin_notify_keylisteners (controller, variant,
+                                            notify_keylisteners_done, invocation);
+  return TRUE;
 }
 
-static DBusMessage *
-impl_notify_listeners_async (DBusConnection *bus, DBusMessage *message, void *user_data)
+static gboolean
+handle_notify_listeners_async (A11yAtspiDeviceEventController *skel,
+                               GDBusMethodInvocation *invocation,
+                               GVariant *variant,
+                               gpointer user_data)
 {
-  SpiDEController *controller = SPI_DEVICE_EVENT_CONTROLLER(user_data);
-  Accessibility_DeviceEvent event;
-  DBusMessage *reply = NULL;
+  SpiDEController *controller = user_data;
 
-  if (!spi_dbus_demarshal_deviceEvent(message, &event))
-  {
-    return invalid_arguments_error (message);
-  }
 #ifdef SPI_DEBUG
-  g_print ("notifylistening listeners asynchronously: controller %p, event id %d\n",
-	   controller, (int) event.id);
+  char *str = g_variant_print (variant, TRUE);
+  g_print ("notifylistening listeners asynchronously: controller %p, event %s\n",
+	   controller, str);
+  g_free (str);
 #endif
-  spi_controller_notify_keylisteners (controller, (Accessibility_DeviceEvent *)
-				      &event, FALSE); 
-  reply = dbus_message_new_method_return (message);
-  return reply;
+  spi_controller_begin_notify_keylisteners (controller, variant,
+                                            notify_keylisteners_done, NULL);
+
+  a11y_atspi_device_event_controller_complete_notify_listeners_async (skel, invocation);
+  return TRUE;
 }
 
 static void
@@ -1860,164 +1671,101 @@ spi_device_event_controller_init (SpiDEController *device_event_controller)
   SpiDEControllerClass *klass;
   klass = SPI_DEVICE_EVENT_CONTROLLER_GET_CLASS (device_event_controller);
 
-  device_event_controller->message_queue = g_queue_new ();
-  saved_controller = device_event_controller;
-
   if (klass->plat.init)
     klass->plat.init (device_event_controller);
 }
 
-
 /*---------------------------------------------------------------------------*/
 
-static const char *introspection_header =
-"<?xml version=\"1.0\"?>\n";
+#define DEVICE_EVENT_OLD_TYPE "(uinnisb)"
+#define DEVICE_EVENT_NEW_TYPE "(uiuuisb)"
 
-static const char *introspection_node_element =
-"<node name=\"%s\">\n";
-
-static const char *introspection_footer =
-"</node>";
-
-static DBusMessage *
-impl_Introspect (DBusConnection * bus,
-                 DBusMessage * message, void *user_data)
+static GVariant *
+adjust_device_event (GVariant *event)
 {
-  GString *output;
-  gchar *final;
+  guint type, hw_code, modifiers;
+  gint id, timestamp;
+  gboolean is_text;
+  const char *event_string;
 
-  const gchar *pathstr = SPI_DBUS_PATH_DEC;
-
-  DBusMessage *reply;
-
-  output = g_string_new(introspection_header);
-
-  g_string_append_printf(output, introspection_node_element, pathstr);
-
-  g_string_append (output, spi_org_a11y_atspi_DeviceEventController);
-
-  g_string_append(output, introspection_footer);
-  final = g_string_free(output, FALSE);
-
-  reply = dbus_message_new_method_return (message);
-  dbus_message_append_args(reply, DBUS_TYPE_STRING, &final, DBUS_TYPE_INVALID);
-
-  g_free(final);
-  return reply;
+  g_variant_get (event, "((uinni&sb))", &type, &id, &hw_code, &modifiers,
+                 &timestamp, &event_string, &is_text);
+  return g_variant_new ("(" DEVICE_EVENT_NEW_TYPE ")", type, id, hw_code, modifiers,
+                        timestamp, event_string, is_text);
 }
 
-/*---------------------------------------------------------------------------*/
-
-static void
-handle_dec_method_from_idle (DBusConnection *bus, DBusMessage *message, void *user_data)
+static GDBusMessage *
+dec_dbus_filter (GDBusConnection *connection,
+                 GDBusMessage *message,
+                 gboolean incoming,
+                 gpointer user_data)
 {
-  const gchar *iface   = dbus_message_get_interface (message);
-  const gchar *member  = dbus_message_get_member (message);
-  DBusHandlerResult result = DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
-  DBusMessage *reply = NULL;
+  GDBusMessage *copy;
+  GVariant *body;
 
-  if (!strcmp (iface, SPI_DBUS_INTERFACE_DEC))
+  if (!incoming)
+    return message;
+
+  if (g_dbus_message_get_message_type (message) == G_DBUS_MESSAGE_TYPE_METHOD_CALL &&
+      g_strcmp0 (g_dbus_message_get_interface (message), SPI_DBUS_INTERFACE_DEC) == 0 &&
+      g_strcmp0 (g_dbus_message_get_path (message), SPI_DBUS_PATH_DEC) == 0 &&
+      (g_strcmp0 (g_dbus_message_get_member (message), "NotifyListenersSync") == 0 ||
+       g_strcmp0 (g_dbus_message_get_member (message), "NotifyListenersAsync") == 0) &&
+      g_strcmp0 (g_dbus_message_get_signature (message), DEVICE_EVENT_OLD_TYPE) == 0)
     {
-      result = DBUS_HANDLER_RESULT_HANDLED;
-      if      (!strcmp (member, "RegisterKeystrokeListener"))
-          reply = impl_register_keystroke_listener (bus, message, user_data);
-      else if (!strcmp (member, "RegisterDeviceEventListener"))
-          reply = impl_register_device_event_listener (bus, message, user_data);
-      else if (!strcmp (member, "DeregisterKeystrokeListener"))
-          reply = impl_deregister_keystroke_listener (bus, message, user_data);
-      else if (!strcmp (member, "DeregisterDeviceEventListener"))
-          reply = impl_deregister_device_event_listener (bus, message, user_data);
-      else if (!strcmp (member, "GetKeystrokeListeners"))
-          reply = impl_get_keystroke_listeners (bus, message, user_data);
-      else if (!strcmp (member, "GetDeviceEventListeners"))
-          reply = impl_get_device_event_listeners (bus, message, user_data);
-      else if (!strcmp (member, "GenerateKeyboardEvent"))
-          reply = impl_generate_keyboard_event (bus, message, user_data);
-      else if (!strcmp (member, "GenerateMouseEvent"))
-          reply = impl_generate_mouse_event (bus, message, user_data);
-      else if (!strcmp (member, "NotifyListenersSync"))
-          reply = impl_notify_listeners_sync (bus, message, user_data);
-      else if (!strcmp (member, "NotifyListenersAsync"))
-          reply = impl_notify_listeners_async (bus, message, user_data);
-      else
-          result = DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+      copy = g_dbus_message_copy (message, NULL);
+      if (!copy)
+        goto out;
+
+      /* Adjust for old signature of NotifyListenersSync/NotifyListenersAsync */
+      body = g_dbus_message_get_body (message);
+      g_dbus_message_set_body (copy, adjust_device_event (body));
+      g_dbus_message_set_signature (copy, DEVICE_EVENT_NEW_TYPE);
+
+      g_object_unref (message);
+      message = copy;
     }
 
-  if (!strcmp (iface, "org.freedesktop.DBus.Introspectable"))
-    {
-      result = DBUS_HANDLER_RESULT_HANDLED;
-      if      (!strcmp (member, "Introspect"))
-          reply = impl_Introspect (bus, message, user_data);
-      else
-          result = DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
-    }
-
-  if (result == DBUS_HANDLER_RESULT_HANDLED)
-    {
-      if (!reply)
-        {
-          reply = dbus_message_new_method_return (message);
-        }
-
-      dbus_connection_send (bus, reply, NULL);
-      dbus_message_unref (reply);
-    }
+ out:
+  return message;
 }
-
-static gboolean
-message_queue_dispatch (gpointer data)
-{
-  saved_controller->message_queue_idle = 0;
-  while (!g_queue_is_empty (saved_controller->message_queue))
-    {
-      DBusMessage *message = g_queue_pop_head (saved_controller->message_queue);
-      data = g_queue_pop_head (saved_controller->message_queue);
-      handle_dec_method_from_idle (saved_controller->bus, message, data);
-      dbus_message_unref (message);
-    }
-  return FALSE;
-}
-
-static DBusHandlerResult
-handle_dec_method (DBusConnection *bus, DBusMessage *message, void *user_data)
-{
-  const gchar *iface   = dbus_message_get_interface (message);
-  const gchar *member  = dbus_message_get_member (message);
-  const gint   type    = dbus_message_get_type (message);
-
-  /* Check for basic reasons not to handle */
-  if (type   != DBUS_MESSAGE_TYPE_METHOD_CALL ||
-      member == NULL ||
-      iface  == NULL)
-      return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
-
-  dbus_message_ref (message);
-  g_queue_push_tail (saved_controller->message_queue, message);
-  g_queue_push_tail (saved_controller->message_queue, user_data);
-  if (!saved_controller->message_queue_idle) {
-    saved_controller->message_queue_idle = g_idle_add (message_queue_dispatch, NULL);
-    g_source_set_name_by_id (saved_controller->message_queue_idle, "[at-spi2-core] message_queue_dispatch");
-  }
-  return DBUS_HANDLER_RESULT_HANDLED;
-}
-
-static DBusObjectPathVTable dec_vtable =
-{
-  NULL,
-  &handle_dec_method,
-  NULL, NULL, NULL, NULL
-};
 
 SpiDEController *
-spi_registry_dec_new (SpiRegistry *reg, DBusConnection *bus)
+spi_registry_dec_new (SpiRegistry *reg, GDBusConnection *bus)
 {
   SpiDEController *dec = g_object_new (SPI_DEVICE_EVENT_CONTROLLER_TYPE, NULL);
+  SpiDEControllerPrivate *priv = spi_device_event_controller_get_instance_private (dec);
 
   dec->registry = g_object_ref (reg);
   reg->dec = g_object_ref (dec);
   dec->bus = bus;
 
-  dbus_connection_register_object_path (bus, SPI_DBUS_PATH_DEC, &dec_vtable, dec);
+  priv->bus_filter_id =
+    g_dbus_connection_add_filter (dec->bus, dec_dbus_filter, dec, NULL);
+
+  priv->dec_skel = a11y_atspi_device_event_controller_skeleton_new ();
+  g_signal_connect (priv->dec_skel, "handle-deregister-device-event-listener",
+                    G_CALLBACK (handle_deregister_device_event_listener), dec);
+  g_signal_connect (priv->dec_skel, "handle-deregister-keystroke-listener",
+                    G_CALLBACK (handle_deregister_keystroke_listener), dec);
+  g_signal_connect (priv->dec_skel, "handle-generate-keyboard-event",
+                    G_CALLBACK (handle_generate_keyboard_event), dec);
+  g_signal_connect (priv->dec_skel, "handle-generate-mouse-event",
+                    G_CALLBACK (handle_generate_mouse_event), dec);
+  g_signal_connect (priv->dec_skel, "handle-get-device-event-listeners",
+                    G_CALLBACK (handle_get_device_event_listeners), dec);
+  g_signal_connect (priv->dec_skel, "handle-get-keystroke-listeners",
+                    G_CALLBACK (handle_get_keystroke_listeners), dec);
+  g_signal_connect (priv->dec_skel, "handle-notify-listeners-async",
+                    G_CALLBACK (handle_notify_listeners_async), dec);
+  g_signal_connect (priv->dec_skel, "handle-notify-listeners-sync",
+                    G_CALLBACK (handle_notify_listeners_sync), dec);
+  g_signal_connect (priv->dec_skel, "handle-register-device-event-listener",
+                    G_CALLBACK (handle_register_device_event_listener), dec);
+  g_signal_connect (priv->dec_skel, "handle-register-keystroke-listener",
+                    G_CALLBACK (handle_register_keystroke_listener), dec);
+  g_dbus_interface_skeleton_export (G_DBUS_INTERFACE_SKELETON (priv->dec_skel),
+                                    bus, SPI_DBUS_PATH_DEC, NULL);
 
   return dec;
 }

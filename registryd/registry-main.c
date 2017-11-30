@@ -203,18 +203,33 @@ register_client (void)
 typedef GObject *(*gconf_client_get_default_t) ();
 typedef gboolean (*gconf_client_get_bool_t)(GObject *, const char *, void *);
 
+static void
+handle_name_acquired (GDBusConnection *bus,
+                      const gchar *name,
+                      gpointer user_data)
+{
+  g_print ("SpiRegistry daemon is running with well-known name - %s\n", name);
+}
+
+static void
+handle_name_lost (GDBusConnection *bus,
+                  const gchar *name,
+                  gpointer user_data)
+{
+  /* most likely already running */
+  exit (0);
+}
+
 int
 main (int argc, char **argv)
 {
+  GDBusConnection *bus = NULL;
+  GOptionContext *opt;
   SpiRegistry *registry;
   SpiDEController *dec;
 
-  DBusConnection *bus = NULL;
-
-  GOptionContext *opt;
-
   GError *err = NULL;
-  int ret;
+  int bus_id;
 
   /*Parse command options*/
   opt = g_option_context_new(NULL);
@@ -229,27 +244,21 @@ main (int argc, char **argv)
   if (dbus_name == NULL)
       dbus_name = SPI_DBUS_NAME_REGISTRY;
 
-  bus = atspi_get_a11y_bus ();
+  bus = atspi_get_a11y_gdbus ();
   if (!bus)
   {
     return 0;
   }
 
   mainloop = g_main_loop_new (NULL, FALSE);
-  atspi_dbus_connection_setup_with_g_main(bus, NULL);
-
-  ret = dbus_bus_request_name(bus, dbus_name, DBUS_NAME_FLAG_DO_NOT_QUEUE, NULL);
-  if (ret == DBUS_REQUEST_NAME_REPLY_EXISTS)
-    {
-      exit (0);	/* most likely already running */
-    }
-  else
-    {
-      g_print ("SpiRegistry daemon is running with well-known name - %s\n", dbus_name);
-    }
-
   registry = spi_registry_new (bus);
   dec = spi_registry_dec_new (registry, bus);
+
+  bus_id = g_bus_own_name_on_connection (bus, dbus_name,
+                                         G_BUS_NAME_OWNER_FLAGS_DO_NOT_QUEUE,
+                                         handle_name_acquired,
+                                         handle_name_lost,
+                                         NULL, NULL);
 
   if (use_gnome_session)
     {
@@ -259,10 +268,10 @@ main (int argc, char **argv)
 
   g_main_loop_run (mainloop);
 
-  dbus_connection_close (bus);
-  dbus_connection_unref (bus);
+  g_bus_unown_name (bus_id);
   g_object_unref (dec);
   g_object_unref (registry);
+  g_main_loop_unref (mainloop);
 
   return 0;
 }

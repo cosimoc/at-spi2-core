@@ -45,8 +45,6 @@
 
 #include <glib.h>
 
-#include <dbus/dbus.h>
-
 #include "paths.h"
 #include "keymasks.h"
 #include "de-types.h"
@@ -56,8 +54,6 @@
 
 #include "deviceeventcontroller.h"
 #include "reentrant-list.h"
-
-#include "introspection.h"
 
 static void spi_dec_x11_emit_modifier_event (SpiDEController *controller,
 			     guint prev_mask,

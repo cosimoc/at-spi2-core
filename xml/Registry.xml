@@ -3,7 +3,7 @@
 <interface name="org.a11y.atspi.Registry">
 
   <method name="RegisterEvent">
-    <arg direction="in" name="event" type="sas">
+    <arg direction="in" name="event" type="(sas)">
     </arg>
   </method>
 

@@ -26,8 +26,7 @@
 
 #include <glib.h>
 #include <glib-object.h>
-
-#include <dbus/dbus.h>
+#include <gio/gio.h>
 
 typedef struct _SpiRegistry SpiRegistry;
 typedef struct _SpiRegistryClass SpiRegistryClass;
@@ -46,9 +45,9 @@ struct _SpiRegistry {
   GObject      parent;
   SpiDEController *dec;
   GPtrArray   *apps;
-  dbus_int32_t id;
+  gint32 id;
 
-  DBusConnection *bus;
+  GDBusConnection *bus;
   GList *events;
 };
 
@@ -57,7 +56,7 @@ struct _SpiRegistryClass {
 };
 
 GType        spi_registry_get_type (void);
-SpiRegistry *spi_registry_new      (DBusConnection *bus);
+SpiRegistry *spi_registry_new      (GDBusConnection *bus);
 
 G_END_DECLS
 

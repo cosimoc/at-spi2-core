@@ -161,6 +161,15 @@ a11y-atspi-selection.h: Selection.xml
 a11y-atspi-selection.c: a11y-atspi-selection.h
 	@: # generated as a side-effect
 
+a11y-atspi-socket.h: Socket.xml
+	$(AM_V_GEN) gdbus-codegen --interface-prefix org.a11y.atspi.Socket. \
+	--generate-c-code $(srcdir)/a11y-atspi-socket \
+	--c-namespace A11yAtspi \
+	--annotate "org.a11y.atspi.Socket" "org.gtk.GDBus.C.Name" Socket \
+	$(srcdir)/Socket.xml
+a11y-atspi-socket.c: a11y-atspi-socket.h
+	@: # generated as a side-effect
+
 a11y-atspi-table.h: Table.xml
 	$(AM_V_GEN) gdbus-codegen --interface-prefix org.a11y.atspi.Table. \
 	--generate-c-code $(srcdir)/a11y-atspi-table \
@@ -228,6 +237,8 @@ BUILT_SOURCES = \
 	a11y-atspi-registry.h \
 	a11y-atspi-selection.c \
 	a11y-atspi-selection.h \
+	a11y-atspi-socket.c \
+	a11y-atspi-socket.h \
 	a11y-atspi-table.c \
 	a11y-atspi-table.h \
 	a11y-atspi-table-cell.c \
