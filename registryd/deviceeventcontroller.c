@@ -51,13 +51,6 @@
 #include "xml/a11y-atspi-device-event-controller.h"
 #include "xml/a11y-atspi-device-event-listener.h"
 
-#define CHECK_RELEASE_DELAY 20
-#define BIT(c, x)       (c[x/8]&(1<<(x%8)))
-
-/* Our parent Gtk object type */
-#define PARENT_TYPE G_TYPE_OBJECT
-
-/* A pointer to our parent object class */
 static int spi_error_code = 0;
 struct _SpiPoint {
     gint x;

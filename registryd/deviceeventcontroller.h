@@ -43,12 +43,12 @@ G_BEGIN_DECLS
 #define SPI_DEVICE_EVENT_CONTROLLER_GET_CLASS(obj) (G_TYPE_INSTANCE_GET_CLASS ((obj), SPI_DEVICE_EVENT_CONTROLLER_TYPE, SpiDEControllerClass))
 
 struct _SpiDEController {
-	GObject parent;
-	GDBusConnection *bus;
-	SpiRegistry    *registry;
-	GList          *key_listeners;
-	GList          *mouse_listeners;
-	GList          *keygrabs_list;
+  GObject parent;
+  GDBusConnection *bus;
+  SpiRegistry    *registry;
+  GList          *key_listeners;
+  GList          *mouse_listeners;
+  GList          *keygrabs_list;
 };
 
 typedef enum {
@@ -68,7 +68,7 @@ typedef struct {
 typedef struct {
   DEControllerListener listener;
 
- GSList *keys;
+  GSList *keys;
   Accessibility_ControllerEventMask mask;
   Accessibility_EventListenerMode  *mode;	
 } DEControllerKeyListener;
