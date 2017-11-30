@@ -6,7 +6,6 @@ EXTRA_DIST = \
 	Cache.xml \
 	Collection.xml \
 	Component.xml \
-	create-introspection.sh \
 	DeviceEventController.xml \
 	DeviceEventListener.xml \
 	Document.xml \
@@ -16,13 +15,11 @@ EXTRA_DIST = \
 	Hypertext.xml \
 	Image.xml \
 	Registry.xml \
-	remove-annotations.xsl \
 	Selection.xml \
 	Socket.xml \
 	Table.xml \
 	Text.xml \
-	Value.xml \
-	versioned-introspection.py
+	Value.xml
 
 noinst_LTLIBRARIES = liba11yatspi-dbus.la
 
@@ -260,11 +257,6 @@ liba11yatspi_dbus_la_LIBADD = \
 liba11yatspi_dbus_la_CFLAGS = \
 	$(GIO_UNIX_CFLAGS) \
 	$(NULL)
-
-CLEANFILES = \
-	introspection.c \
-	introspection.h \
-	Processed.xml
 
 #BUILT_SOURCES = spec.xml
 #CLEANFILES += spec.xml
