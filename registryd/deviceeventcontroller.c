@@ -97,7 +97,10 @@ static gboolean eventtype_seq_contains_event (dbus_uint32_t types,
 static gboolean spi_dec_poll_mouse_moving (gpointer data);
 static gboolean spi_dec_poll_mouse_idle (gpointer data);
 
-G_DEFINE_TYPE(SpiDEController, spi_device_event_controller, G_TYPE_OBJECT)
+typedef struct {
+} SpiDEControllerPrivate;
+
+G_DEFINE_TYPE_WITH_PRIVATE (SpiDEController, spi_device_event_controller, G_TYPE_OBJECT)
 
 static gint
 spi_dec_plat_get_keycode (SpiDEController *controller,
@@ -1318,11 +1321,9 @@ spi_controller_update_key_grabs (SpiDEController           *controller,
 static void
 spi_device_event_controller_object_finalize (GObject *object)
 {
-  SpiDEController *controller;
-  GObjectClass *parent_class = G_OBJECT_CLASS(spi_device_event_controller_parent_class);
+  SpiDEController *controller = SPI_DEVICE_EVENT_CONTROLLER (object);
   SpiDEControllerClass *klass;
 
-  controller = SPI_DEVICE_EVENT_CONTROLLER (object);
   klass = SPI_DEVICE_EVENT_CONTROLLER_GET_CLASS (controller);
 #ifdef SPI_DEBUG
   fprintf(stderr, "spi_device_event_controller_object_finalize called\n");
@@ -1330,7 +1331,7 @@ spi_device_event_controller_object_finalize (GObject *object)
   if (klass->plat.finalize)
     klass->plat.finalize (controller);
 
-  parent_class->finalize (object);
+  G_OBJECT_CLASS (spi_device_event_controller_parent_class)->finalize (object);
 }
 
 /*
@@ -1845,16 +1846,12 @@ spi_device_event_controller_class_init (SpiDEControllerClass *klass)
 {
   GObjectClass * object_class = (GObjectClass *) klass;
 
-  spi_device_event_controller_parent_class = g_type_class_peek_parent (klass);
-
   object_class->finalize = spi_device_event_controller_object_finalize;
 
 #ifdef HAVE_X11
   if (g_getenv ("DISPLAY"))
     spi_dec_setup_x11 (klass);
-  else
 #endif
-  g_type_class_add_private (object_class, sizeof (long)); /* dummy */
 }
 
 static void
@@ -1863,10 +1860,6 @@ spi_device_event_controller_init (SpiDEController *device_event_controller)
   SpiDEControllerClass *klass;
   klass = SPI_DEVICE_EVENT_CONTROLLER_GET_CLASS (device_event_controller);
 
-  /* TODO: shouldn't be gpointer below */
-  device_event_controller->priv = G_TYPE_INSTANCE_GET_PRIVATE (device_event_controller,
-                                              SPI_DEVICE_EVENT_CONTROLLER_TYPE,
-                                              gpointer);
   device_event_controller->message_queue = g_queue_new ();
   saved_controller = device_event_controller;
 
