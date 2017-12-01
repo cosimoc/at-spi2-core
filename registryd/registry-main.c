@@ -198,9 +198,6 @@ register_client (void)
 
 /*---------------------------------------------------------------------------*/
 
-typedef GObject *(*gconf_client_get_default_t) ();
-typedef gboolean (*gconf_client_get_bool_t)(GObject *, const char *, void *);
-
 static void
 handle_name_acquired (GDBusConnection *bus,
                       const gchar *name,
