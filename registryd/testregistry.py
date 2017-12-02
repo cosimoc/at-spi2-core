@@ -1,13 +1,8 @@
 #!/usr/bin/python
 
 import sys
-import dbus
-import dbus.service
-import gobject
 
-from dbus.mainloop.glib import DBusGMainLoop
-
-DBusGMainLoop(set_as_default=True)
+from gi.repository import Gio, GLib
 
 class IdleStateM (object):
         def __init__(self, bus, loop):
@@ -22,10 +17,10 @@ class IdleStateM (object):
                 return True
 
         def setup(self):
-                self.obj = self._bus.get_object("org.a11y.atspi.Registry",
-                                                "/org/a11y/atspi/accessible/root",
-                                                introspect=False)
-                self.itf = dbus.Interface(self.obj, dbus_interface="org.a11y.atspi.Accessible")
+                self.obj = Gio.DBusProxy.new_sync(self._bus, Gio.DBusProxyFlags.NONE,
+                                                  None, "org.a11y.atspi.Registry",
+                                                  "/org/a11y/atspi/accessible/root",
+                                                  "org.a11y.atspi.Accessible", None)
                 return self.register_apps
 
         def register_apps(self):
@@ -34,7 +29,7 @@ class IdleStateM (object):
                 return self.print_applications
 
         def print_applications(self):
-                apps = self.itf.GetChildren()
+                apps = self.obj.GetChildren()
                 print apps
                 return self.teardown
 
@@ -42,17 +37,19 @@ class IdleStateM (object):
                 self._loop.quit()
 
 def main(argv):
-        bus = dbus.SessionBus()
-        obj = bus.get_object("org.a11y.Bus",
-                             "/org/a11y/bus",
-                             introspect=False)
-        itf = dbus.Interface(obj, dbus_interface="org.a11y.Bus")
-        address = itf.GetAddress()
+        session_bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        proxy = Gio.DBusProxy.new_sync(session_bus, Gio.DBusProxyFlags.NONE,
+                                       None, "org.a11y.Bus", "/org/a11y/bus",
+                                       "org.a11y.Bus", None)
 
-        bus = dbus.bus.BusConnection(str(address))
-        loop = gobject.MainLoop()
+        address = proxy.GetAddress()
+        bus = Gio.DBusConnection.new_for_address_sync(address,
+                                                      Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT |
+                                                      Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,
+                                                      None, None)
+        loop = GLib.MainLoop()
         stateM = IdleStateM(bus, loop)
-        gobject.idle_add(stateM.idle_handler)
+        GLib.idle_add(stateM.idle_handler)
         loop.run()
 
 if __name__=="__main__":
