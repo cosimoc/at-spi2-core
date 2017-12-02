@@ -30,6 +30,7 @@ class IdleStateM (object):
 
         def print_applications(self):
                 apps = self.obj.GetChildren()
+                print "{} applications found".format(len(apps))
                 print apps
                 return self.teardown
 
