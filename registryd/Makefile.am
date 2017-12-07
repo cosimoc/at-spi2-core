@@ -35,9 +35,7 @@ at_spi2_registryd_SOURCES =	\
 	registry.c		\
 	registry.h		\
 	deviceeventcontroller.c	\
-	deviceeventcontroller.h	\
-	reentrant-list.c	\
-	reentrant-list.h
+	deviceeventcontroller.h
 
 X11_SOURCES = \
 	deviceeventcontroller-x11.c \

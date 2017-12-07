@@ -6,7 +6,6 @@ registryd_sources = [
   'registry.c',
   'introspection.c',
   'deviceeventcontroller.c',
-  'reentrant-list.c',
 ]
 
 registryd_deps = [

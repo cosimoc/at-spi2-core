@@ -47,7 +47,6 @@
 #endif
 
 #include "deviceeventcontroller.h"
-#include "reentrant-list.h"
 
 #include "xml/a11y-atspi-device-event-controller.h"
 #include "xml/a11y-atspi-device-event-listener.h"
