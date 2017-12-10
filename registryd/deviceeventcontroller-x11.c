@@ -1029,7 +1029,7 @@ spi_dec_x11_synth_keycode_press (SpiDEController *controller,
 {
 	unsigned int time = CurrentTime;
 	unsigned int bounce_delay;
-	unsigned int elapsed_msec;
+	unsigned int elapsed_msec G_GNUC_UNUSED;
 	struct timeval tv;
 	DEControllerPrivateData *priv = get_x11_data (controller);
 
@@ -1073,7 +1073,7 @@ spi_dec_x11_synth_keycode_release (SpiDEController *controller,
 {
 	unsigned int time = CurrentTime;
 	unsigned int slow_delay;
-	unsigned int elapsed_msec;
+	unsigned int elapsed_msec G_GNUC_UNUSED;
 	struct timeval tv;
 	DEControllerPrivateData *priv = get_x11_data (controller);
 
@@ -1405,8 +1405,6 @@ spi_dec_x11_generate_mouse_event (SpiDEController *controller,
 void
 spi_dec_setup_x11 (SpiDEControllerClass *klass)
 {
-  GObjectClass *object_class = G_OBJECT_CLASS (klass);
-
   klass->plat.get_keycode = spi_dec_x11_get_keycode;
   klass->plat.mouse_check = spi_dec_x11_mouse_check;
   klass->plat.synth_keycode_press = spi_dec_x11_synth_keycode_press;
