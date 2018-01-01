@@ -211,7 +211,7 @@ handle_name_lost (GDBusConnection *bus,
                   const gchar *name,
                   gpointer user_data)
 {
-  /* most likely already running */
+  g_print ("SpiRegistry daemon well-known name %s is already taken, exiting\n", name);
   exit (0);
 }
 
